@@ -1175,3 +1175,28 @@ def test_routes_accept_model_names_with_slashes(client):
 
     assert client.get("/all-chats/hf.co/u/repo").status_code == 200
     assert client.get(f"/chat-history/hf.co/u/repo/{chat.id}").status_code == 200
+
+
+def test_compare_votes_build_a_scoreboard(client):
+    for winner in ("a:1b", "a:1b", "b:2b"):
+        response = client.post(
+            "/compare-votes/",
+            data=json.dumps({"prompt": "p", "winner": winner, "contenders": ["a:1b", "b:2b"]}),
+            content_type="application/json",
+        )
+        assert response.status_code == 201
+
+    board = client.get("/compare-votes/").json()
+
+    assert board[0] == {"model": "a:1b", "wins": 2, "matches": 3, "win_rate": 2 / 3}
+    assert board[1]["model"] == "b:2b"
+
+
+def test_compare_vote_winner_must_be_a_contender(client):
+    response = client.post(
+        "/compare-votes/",
+        data=json.dumps({"prompt": "p", "winner": "c:3b", "contenders": ["a:1b", "b:2b"]}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400

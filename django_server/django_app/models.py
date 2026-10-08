@@ -168,6 +168,21 @@ class ChatMessage(models.Model):
         return f"{self.role}: {self.content[:50]}"
 
 
+class CompareVote(models.Model):
+    """One blind comparison the user judged: which answer they liked best
+    among the models that answered the same prompt. Feeds the personal
+    scoreboard on the Compare page."""
+
+    prompt = models.TextField()
+    winner = models.TextField()
+    # "name:tag" of every model that answered, winner included.
+    contenders = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.winner} of {len(self.contenders)}"
+
+
 class MCPServer(models.Model):
     """An external Model Context Protocol server the user has configured —
     its tools are merged with the built-in ones whenever tool calling is on

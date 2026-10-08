@@ -120,6 +120,50 @@ class AIModels(APIView):
 _MODEL_REFERENCE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*(:[A-Za-z0-9._-]+)?$")
 
 
+class CompareVotes(APIView):
+    def get(self, request: Request) -> Response:
+        """Scoreboard: per model, how often it won the blind comparisons it
+        took part in."""
+        matches: dict[str, int] = {}
+        wins: dict[str, int] = {}
+        for vote in models.CompareVote.objects.all():
+            for contender in vote.contenders:
+                matches[contender] = matches.get(contender, 0) + 1
+            wins[vote.winner] = wins.get(vote.winner, 0) + 1
+
+        board = [
+            {"model": name, "wins": wins.get(name, 0), "matches": count, "win_rate": wins.get(name, 0) / count}
+            for name, count in matches.items()
+        ]
+        board.sort(key=lambda row: (-row["win_rate"], -row["matches"]))
+        return Response(board, status=status.HTTP_200_OK)
+
+    @decorators.required_body_params(["prompt", "winner", "contenders"])
+    def post(self, request: Request) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+        prompt, winner, contenders = request_data["prompt"], request_data["winner"], request_data["contenders"]
+
+        if (
+            not isinstance(prompt, str)
+            or not isinstance(winner, str)
+            or not isinstance(contenders, list)
+            or not all(isinstance(c, str) for c in contenders)
+            or len(contenders) < 2
+            or winner not in contenders
+        ):
+            return Response(
+                {"error": "A vote needs the prompt, at least two contenders, and a winner among them."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        models.CompareVote.objects.create(prompt=prompt, winner=winner, contenders=contenders)
+        return Response({"status": "Vote saved"}, status=status.HTTP_201_CREATED)
+
+    def delete(self, request: Request) -> Response:
+        models.CompareVote.objects.all().delete()
+        return Response({"status": "Scoreboard cleared"}, status=status.HTTP_200_OK)
+
+
 class CustomModels(APIView):
     @decorators.required_body_params(["reference"])
     def post(self, request: Request) -> Response:
