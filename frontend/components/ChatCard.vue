@@ -242,6 +242,19 @@ function openDialog(target: DialogTarget) {
 
 const modelRunning = computed(() => selectedModel.value?.status === 'running')
 
+// The installed model's own report beats the ollama.com catalog, which has
+// listed capable models without their "tools" chip.
+function modelHas(capability: string, catalogFlag: boolean | undefined): boolean {
+  const reported = chatContext.value?.capabilities
+  if (reported?.length)
+    return reported.includes(capability)
+
+  return !!catalogFlag
+}
+
+const toolsAvailable = computed(() => modelHas('tools', selectedModel.value?.canUseTools))
+const visionAvailable = computed(() => modelHas('vision', selectedModel.value?.canProcessImages))
+
 const sendGateOk = computed(() => !!selectedChatId.value && !!websocket.value && !isReconnecting.value && !reconnectFailed.value,
 )
 
@@ -723,7 +736,7 @@ watch(waitingForResponse, (newValue) => {
             :params="currentChatGenerationParams"
             :active-collections-count="currentChatActiveCollections.length"
             :tools-enabled="currentChatToolsEnabled"
-            :tools-available="!!selectedModel?.canUseTools"
+            :tools-available="toolsAvailable"
             :thinking-controls="chatContext?.thinking ?? null"
             :think-level="currentChatSummary?.think_level ?? ''"
             :json-enabled="jsonEnforced"
@@ -742,7 +755,7 @@ watch(waitingForResponse, (newValue) => {
           :model-running="modelRunning"
           :waiting-for-response="waitingForResponse"
           :send-gate-ok="sendGateOk"
-          :show-image-button="!!selectedModel?.canProcessImages"
+          :show-image-button="visionAvailable"
           @send="handleSend"
           @stop="handleStop"
           @image-attached="scrollToBottom"

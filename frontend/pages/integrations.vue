@@ -13,8 +13,61 @@ const newTransport = ref<MCPTransport>('stdio')
 const newCommandOrUrl = ref('')
 const saving = ref(false)
 
+type WebSearchStatus = 'off' | 'installing' | 'running' | 'stopped'
+
+const WEB_SEARCH_LABELS: Record<WebSearchStatus, string> = {
+  off: 'Off.',
+  installing: 'Setting up — downloading the search service the first time takes a minute…',
+  running: 'On — turn on Tools in a chat and the model can search when it needs to.',
+  stopped: 'Paused. Turn it on to start it again.',
+}
+
+const { api } = storeToRefs(useApiStore())
+const snackbarStore = useSnackbarStore()
+const webSearchStatus = ref<WebSearchStatus>('off')
+const webSearchBusy = ref(false)
+let webSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+async function fetchWebSearchStatus() {
+  try {
+    webSearchStatus.value = (await api.value.get('/docker/web-search/')).data.status
+  }
+  catch (error: any) {
+    console.error(error)
+  }
+
+  if (webSearchTimer !== null)
+    clearTimeout(webSearchTimer)
+  if (webSearchStatus.value === 'installing')
+    webSearchTimer = setTimeout(fetchWebSearchStatus, 3000)
+}
+
+async function toggleWebSearch(enabled: boolean | null) {
+  webSearchBusy.value = true
+  try {
+    if (enabled)
+      await api.value.post('/docker/web-search/', {})
+    else
+      await api.value.delete('/docker/web-search/')
+  }
+  catch (error: any) {
+    console.error(error)
+    snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not change web search.')
+  }
+  finally {
+    webSearchBusy.value = false
+  }
+  await fetchWebSearchStatus()
+}
+
 onMounted(() => {
   mcpServerStore.fetchServers()
+  fetchWebSearchStatus()
+})
+
+onUnmounted(() => {
+  if (webSearchTimer !== null)
+    clearTimeout(webSearchTimer)
 })
 
 function openCreateForm() {
@@ -101,6 +154,37 @@ function cancelDelete() {
       turned on — alongside the built-in calculator and current-time tools. With <strong>Ask first</strong>
       on, you see and approve each tool call before it runs.
     </p>
+
+    <section class="web-search-card">
+      <div class="web-search-head">
+        <div>
+          <div class="web-search-title">
+            Web search
+          </div>
+
+          <p class="web-search-body">
+            Lets models with tool support look things up online when they need current information. It runs
+            your own private search service on this computer — no account needed. Your search terms are sent
+            to public search engines; nothing else from your chats is.
+          </p>
+        </div>
+
+        <v-switch
+          :model-value="webSearchStatus === 'running' || webSearchStatus === 'installing'"
+          :loading="webSearchStatus === 'installing'"
+          :disabled="webSearchStatus === 'installing' || webSearchBusy"
+          density="compact"
+          hide-details
+          color="mint-btn"
+          aria-label="Web search"
+          @update:model-value="toggleWebSearch"
+        />
+      </div>
+
+      <div class="web-search-status">
+        {{ WEB_SEARCH_LABELS[webSearchStatus] }}
+      </div>
+    </section>
 
     <div
       v-if="!servers.length && !loading && !creating"
@@ -299,6 +383,40 @@ function cancelDelete() {
   line-height: 1.6;
   color: var(--color-ink-2);
   margin: 0 0 22px;
+}
+
+.web-search-card {
+  margin-bottom: 22px;
+  padding: 16px 18px;
+  border-radius: 13px;
+  border: 1px solid var(--color-line-2);
+  background: var(--color-card);
+}
+
+.web-search-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.web-search-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.web-search-body {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+}
+
+.web-search-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-mint-deep);
 }
 
 .empty-card {

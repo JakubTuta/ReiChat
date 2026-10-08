@@ -398,7 +398,7 @@ def test_continue_chat_copies_settings_and_links_the_source(client, chat):
 def test_chat_context_estimates_memory_use_before_sending(client, chat, monkeypatch):
     from django_app import functions
 
-    monkeypatch.setattr(functions, "get_model_info", lambda model, params: {"context_length": 4096, "thinking": None})
+    monkeypatch.setattr(functions, "get_model_info", lambda model, params: {"context_length": 4096, "thinking": None, "capabilities": []})
     user = models.ChatMessage.objects.create(chat=chat, role="user", content="word " * 700)
     reply = models.ChatMessage.objects.create(chat=chat, parent=user, role="assistant", content="ok")
     chat.active_leaf = reply

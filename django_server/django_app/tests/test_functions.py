@@ -194,6 +194,12 @@ class _FakeToolLLM:
             yield chunk
 
 
+@pytest.fixture(autouse=True)
+def _web_search_off(monkeypatch):
+    # The real check asks Docker whether the SearXNG container runs.
+    monkeypatch.setattr(functions.web_search_tool, "available", lambda: False)
+
+
 @pytest.fixture
 def tool_test_model() -> models.AIModel:
     models.AIModel.objects.filter(model="llama3.1-tool-fn-test").delete()
@@ -585,3 +591,47 @@ def test_generated_title_never_replaces_one_the_user_typed():
     untitled.refresh_from_db()
     assert renamed.title == "My own name"
     assert untitled.title == "Generated"
+
+
+async def test_web_search_is_offered_and_run_only_when_turned_on(tool_test_model, monkeypatch):
+    monkeypatch.setattr(
+        functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
+    )
+    monkeypatch.setattr(functions.web_search_tool, "available", lambda: True)
+    bound: list = []
+
+    class _Tool:
+        name = "web_search"
+
+        @staticmethod
+        def invoke(args):
+            return f"results for {args['query']}"
+
+    monkeypatch.setattr(functions.web_search_tool, "web_search", _Tool)
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": "web_search", "args": {"query": "ollama news"}, "id": "c1"}),
+        _text_turn("done"),
+    ])
+    original_bind = fake_llm.bind_tools
+
+    def _bind(tools):
+        bound.extend(tools)
+        return original_bind(tools)
+
+    fake_llm.bind_tools = _bind
+    monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
+
+    chunks = [c async for c in functions.astream_tool_response(tool_test_model, "8b", "news?", "", [])]
+
+    assert _Tool in bound
+    assert chunks[0] == {"name": "web_search", "args": {"query": "ollama news"}, "result": "results for ollama news"}
+
+
+
+def test_model_can_prefers_the_models_own_answer():
+    info = {"context_length": 8192, "thinking": None, "capabilities": ["completion", "tools"]}
+
+    assert functions.model_can("tools", info, catalog_flag=False) is True
+    assert functions.model_can("vision", info, catalog_flag=True) is False
+    assert functions.model_can("tools", None, catalog_flag=True) is True
+    assert functions.model_can("tools", {**info, "capabilities": []}, catalog_flag=False) is False

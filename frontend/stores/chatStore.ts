@@ -40,6 +40,9 @@ export interface IChatContext extends ContextReport {
   tokens_per_page: number
   // null when the model can't think.
   thinking: ThinkingControls | null
+  // What the installed model reports ("tools", "vision", …); null when it
+  // couldn't be asked.
+  capabilities: string[] | null
 }
 
 export interface IGenerationParams {

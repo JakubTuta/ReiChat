@@ -1,8 +1,8 @@
 """Built-in tools offered to any model with the `tools` capability
 (AIModel.can_use_tools). Deliberately small and side-effect-free — no
-network access, no filesystem access — since this app has no auth and
-anything a tool can do, any page on the user's LAN could indirectly trigger
-by driving the chat UI.
+network access, no filesystem access — since a model can be steered into
+calling a tool by text it reads. Web search, the one tool that reaches the
+network, lives in web_search.py and is only offered once the user opts in.
 """
 
 import ast

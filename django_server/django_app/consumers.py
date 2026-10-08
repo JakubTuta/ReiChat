@@ -364,14 +364,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     chat_history, user_prompt, content, image, full_thinking, model_label
                 )
 
-        # Structured output and tool calling are separate response shapes —
-        # a schema-constrained JSON reply has nowhere to put an intermediate
-        # tool call, so structured_output always wins when both are set.
-        use_tools = (
-            structured_output is None
-            and chat_history.tools_enabled
-            and ai_model.can_use_tools
-        )
 
         # Everything that can fail — including this setup — lives inside the
         # try: an exception escaping here would end the task without ever
@@ -400,6 +392,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 ai_model.model, ai_model_parameters
             )
             reasoning = functions.resolve_reasoning(chat_history.think_level, model_info)
+            # Structured output and tool calling are separate response shapes —
+            # a schema-constrained JSON reply has nowhere to put an intermediate
+            # tool call, so structured_output always wins when both are set.
+            use_tools = (
+                structured_output is None
+                and chat_history.tools_enabled
+                and functions.model_can("tools", model_info, ai_model.can_use_tools)
+            )
             system_prompt, history_messages, context_report = await self._fit_to_memory(
                 model_info,
                 ai_model,

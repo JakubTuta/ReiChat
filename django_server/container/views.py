@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from django_app import ollama_api
 from django_app.models import AIModel, AIModelVersion
 
-from . import hardware, install
+from . import hardware, install, searxng
 from .ContainerManager import ContainerError, ContainerManager
 
 logger = logging.getLogger(__name__)
@@ -181,6 +181,26 @@ class OllamaUpdate(APIView):
 
         install.start_ollama_update()
         return Response({"status": "Ollama update started"}, status=status.HTTP_202_ACCEPTED)
+
+
+class WebSearch(APIView):
+    def get(self, request) -> Response:
+        return Response({"status": searxng.status()}, status=status.HTTP_200_OK)
+
+    def post(self, request) -> Response:
+        docker_client = ContainerManager()
+        if not docker_client.is_connected() and not docker_client.connect_to_docker():
+            return Response({"error": "Error connecting to Docker"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        searxng.start_enable()
+        return Response({"status": "installing"}, status=status.HTTP_202_ACCEPTED)
+
+    def delete(self, request) -> Response:
+        try:
+            searxng.disable()
+        except ContainerError as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"status": "off"}, status=status.HTTP_200_OK)
 
 
 class OllamaImage(APIView):

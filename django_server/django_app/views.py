@@ -1103,6 +1103,7 @@ class ChatContext(APIView):
                 "presets": context_window.MEMORY_PRESETS,
                 "tokens_per_page": context_window.TOKENS_PER_PAGE,
                 "thinking": model_info["thinking"] if model_info else None,
+                "capabilities": model_info["capabilities"] if model_info else None,
             },
             status=status.HTTP_200_OK,
         )

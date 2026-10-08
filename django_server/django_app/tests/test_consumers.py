@@ -243,7 +243,7 @@ async def test_memory_never_exceeds_what_the_model_supports(chat, monkeypatch):
     chat.num_ctx = 32768
     await database_sync_to_async(chat.save)(update_fields=["num_ctx"])
     monkeypatch.setattr(
-        functions, "get_model_info", lambda model_name, parameters: {"context_length": 2048, "thinking": None}
+        functions, "get_model_info", lambda model_name, parameters: {"context_length": 2048, "thinking": None, "capabilities": []}
     )
     captured: dict = {}
     monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
@@ -987,7 +987,7 @@ async def test_thinking_is_streamed_separately_and_saved_with_the_reply(chat, mo
     await database_sync_to_async(chat.save)(update_fields=["think_level"])
     monkeypatch.setattr(
         functions, "get_model_info",
-        lambda model_name, parameters: {"context_length": 8192, "thinking": {"values": [False, True], "default": True}},
+        lambda model_name, parameters: {"context_length": 8192, "thinking": {"values": [False, True], "default": True}, "capabilities": []},
     )
     received: dict = {}
 
@@ -1085,4 +1085,25 @@ async def test_replies_record_which_model_wrote_them(chat, monkeypatch):
         lambda: models.ChatMessage.objects.filter(chat=chat, role="assistant").get()
     )()
     assert reply.model_label == "llama3.1:8b"
+
+
+async def test_tools_follow_what_the_installed_model_reports_over_the_catalog(chat, monkeypatch):
+    # The catalog said no tools (chat fixture's model), but the model says yes.
+    chat.tools_enabled = True
+    await database_sync_to_async(chat.save)(update_fields=["tools_enabled"])
+    monkeypatch.setattr(
+        functions, "get_model_info",
+        lambda model_name, parameters: {"context_length": 8192, "thinking": None, "capabilities": ["tools"]},
+    )
+    used: list[str] = []
+
+    async def _fake_tools(*args, **kwargs):
+        used.append("tools")
+        yield "ok"
+
+    monkeypatch.setattr(functions, "astream_tool_response", _fake_tools)
+
+    await _send_and_collect(chat)
+
+    assert used == ["tools"]
 

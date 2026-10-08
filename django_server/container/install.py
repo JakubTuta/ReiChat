@@ -173,9 +173,11 @@ def _install(model_name: str, parameters: str, container_name: str, force_pull: 
 
 
 def _sync_custom_model_capabilities(model_name: str, parameters: str, base_url: str) -> None:
-    """A model added by name has no ollama.com listing to say whether it
-    can see images or use tools — ask the model itself once it's in."""
-    ai_model = AIModel.objects.filter(model=model_name, is_custom=True).first()
+    """Records what the installed model says it can do. A model added by
+    name has no ollama.com listing at all, and the scraped listing for
+    catalog models has been wrong (qwen3 shown without tools) — the model's
+    own answer is the truth for the version actually installed."""
+    ai_model = AIModel.objects.filter(model=model_name).first()
     if ai_model is None:
         return
 
@@ -184,10 +186,15 @@ def _sync_custom_model_capabilities(model_name: str, parameters: str, base_url: 
         return
 
     capabilities = set(ollama_api.capabilities(info))
+    if not capabilities:
+        return
     ai_model.can_process_image = "vision" in capabilities
     ai_model.can_use_tools = "tools" in capabilities
     ai_model.is_embedding = capabilities == {"embedding"}
     ai_model.save(update_fields=["can_process_image", "can_use_tools", "is_embedding"])
+
+    if not ai_model.is_custom:
+        return
 
     sizes = ollama_api.installed_model_sizes(base_url) or {}
     if size := sizes.get(f"{model_name}:{parameters}"):

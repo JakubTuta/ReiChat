@@ -18,6 +18,7 @@ from container.ContainerManager import LABEL_GPU, ContainerManager
 
 from . import context_window, models, ollama_api, progress_state
 from .mcp_integration import client as mcp_client
+from .tools import web_search as web_search_tool
 from .tools.builtin import BUILTIN_TOOLS, BUILTIN_TOOLS_BY_NAME
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,17 @@ class ThinkingDelta(typing.NamedTuple):
 class ModelInfo(typing.TypedDict):
     context_length: int | None
     thinking: ollama_api.ThinkingControls | None
+    # What the installed model itself says it can do ("tools", "vision",
+    # ...) — more reliable than the catalog scraped from ollama.com.
+    capabilities: list[str]
+
+
+def model_can(capability: str, info: ModelInfo | None, catalog_flag: bool) -> bool:
+    """The model's own answer when it can be asked, the catalog's guess
+    otherwise (container down, older Ollama without capabilities)."""
+    if info and info["capabilities"]:
+        return capability in info["capabilities"]
+    return catalog_flag
 
 
 # ChatHistory.think_level values besides "" (use the model's default) and a
@@ -270,6 +282,8 @@ async def astream_tool_response(
     # down just contributes no tools rather than blocking this turn.
     mcp_lookup: dict[str, tuple[models.MCPServer, str]] = {}
     tool_specs: list[typing.Any] = list(BUILTIN_TOOLS)
+    if await sync_to_async(web_search_tool.available, thread_sensitive=False)():
+        tool_specs.append(web_search_tool.web_search)
 
     if mcp_servers:
         tool_lists = await asyncio.gather(
@@ -351,6 +365,11 @@ async def _run_tool_call(
         return await sync_to_async(
             BUILTIN_TOOLS_BY_NAME[name].invoke, thread_sensitive=False
         )(args)
+
+    if name == web_search_tool.web_search.name:
+        return _truncate_tool_result(
+            await sync_to_async(web_search_tool.web_search.invoke, thread_sensitive=False)(args)
+        )
 
     if name in mcp_lookup:
         server, original_name = mcp_lookup[name]
@@ -592,6 +611,7 @@ def get_model_info(model_name: str, parameters: str) -> ModelInfo | None:
     return {
         "context_length": ollama_api.context_length(show_info),
         "thinking": ollama_api.thinking_controls(show_info),
+        "capabilities": ollama_api.capabilities(show_info),
     }
 
 

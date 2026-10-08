@@ -14,4 +14,5 @@ urlpatterns: list[URLPattern] = [
     path("container/<path:model>", views.Container.as_view(), name="container"),
     path("runtime/", views.Runtime.as_view(), name="runtime"),
     path("ollama-update/", views.OllamaUpdate.as_view(), name="ollama-update"),
+    path("web-search/", views.WebSearch.as_view(), name="web-search"),
 ]
