@@ -10,6 +10,8 @@ urlpatterns: list[URLPattern] = [
         name="chat_history",
     ),
     path("all-chats/<str:model>", views.AllChats.as_view(), name="all_chats"),
+    path("chat-continue/<str:model>", views.ContinueChat.as_view(), name="chat_continue"),
+    path("chat-context/<str:model>/<str:chat_id>", views.ChatContext.as_view(), name="chat_context"),
     path("ai-models/", views.AIModels.as_view(), name="ai_models"),
     path("personas/", views.Personas.as_view(), name="personas"),
     path("prompt-templates/", views.PromptTemplates.as_view(), name="prompt_templates"),

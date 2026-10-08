@@ -16,7 +16,7 @@ from langchain_ollama import ChatOllama
 
 from container.ContainerManager import ContainerManager
 
-from . import models, progress_state
+from . import context_window, models, ollama_api, progress_state
 from .mcp_integration import client as mcp_client
 from .tools.builtin import BUILTIN_TOOLS, BUILTIN_TOOLS_BY_NAME
 
@@ -473,15 +473,82 @@ def get_ollama_url(model_name: str, parameters: str) -> tuple[str, str] | None:
     return base_url, f"{model_name}:{parameters}"
 
 
-def deserialize_messages(messages) -> list[dict[str, str]]:
+def deserialize_messages(messages) -> list[dict[str, typing.Any]]:
+    # "id" rides along for context_window bookkeeping (which message a
+    # summary covers up to); _map_history ignores it when building the
+    # actual LLM payload.
     return [
         {
+            "id": message.id,
             "role": str(message.role),
             "content": str(message.content),
             "image": str(message.image) if message.image else "",
         }
         for message in messages
     ]
+
+
+def get_model_context_length(model_name: str, parameters: str) -> int | None:
+    """The model's trained maximum context, read from its own Ollama
+    container — None when that can't be determined (container down, older
+    Ollama), in which case the caller just doesn't cap."""
+    try:
+        url_info = get_ollama_url(model_name, parameters)
+    except ModelUnavailableError:
+        return None
+    if url_info is None:
+        return None
+
+    info = ollama_api.show_model(*url_info)
+    return ollama_api.context_length(info) if info else None
+
+
+async def asummarize_conversation(
+    model: models.AIModel,
+    parameters: str,
+    previous_summary: str,
+    messages: list[dict[str, typing.Any]],
+    num_ctx: int,
+) -> str:
+    url_info = await sync_to_async(get_ollama_url, thread_sensitive=False)(model.model, parameters)
+    if url_info is None:
+        raise ModelUnavailableError(
+            "Model container isn't running or is still pulling. "
+            "Check the Models page and try again once it shows 'Running'."
+        )
+
+    base_url, full_model_string = url_info
+    prompt = context_window.build_summary_prompt(previous_summary, messages, num_ctx)
+    llm = _build_chat_ollama(base_url, full_model_string, num_ctx=num_ctx, temperature=0.2)
+
+    try:
+        response = await llm.ainvoke([{"role": "user", "content": prompt}])
+    except httpx.HTTPError as e:
+        raise ModelUnavailableError(
+            "Could not reach the model — it may still be starting up. Try again in a moment."
+        ) from e
+    except ollama.ResponseError as e:
+        raise ModelUnavailableError(f"Ollama rejected the request: {e}") from e
+
+    return response.text.strip()
+
+
+def save_memory_summary(chat_history: models.ChatHistory, summary: str, until_message_id: int) -> None:
+    chat_history.memory_summary = summary
+    chat_history.memory_summary_until_id = until_message_id
+    chat_history.save(update_fields=["memory_summary", "memory_summary_until"])
+
+
+def save_seed_summary(chat_history: models.ChatHistory, summary: str) -> None:
+    chat_history.seed_summary = summary
+    chat_history.save(update_fields=["seed_summary"])
+
+
+def get_seed_source_history(chat_history: models.ChatHistory) -> list[dict[str, typing.Any]]:
+    if chat_history.seed_source_id is None:
+        return []
+    source = models.ChatHistory.objects.filter(id=chat_history.seed_source_id).first()
+    return deserialize_messages(get_messages_for_chat(source)) if source else []
 
 
 MIN_SEARCH_QUERY_LENGTH = 2

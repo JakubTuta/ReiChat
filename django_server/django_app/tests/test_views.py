@@ -347,8 +347,71 @@ def test_get_all_chats_includes_persona(client, chat):
             "seed": None,
             "active_collections": [],
             "tools_enabled": False,
+            "memory_mode": "trim",
+            "continued_from": None,
         },
     ]
+
+
+def test_put_all_chats_sets_memory_mode(client, chat):
+    response = client.put(
+        _all_chats_url(chat), data=json.dumps({"id": chat.id, "memory_mode": "summarize"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    chat.refresh_from_db()
+    assert chat.memory_mode == "summarize"
+
+
+def test_put_all_chats_rejects_unknown_memory_mode(client, chat):
+    response = client.put(
+        _all_chats_url(chat), data=json.dumps({"id": chat.id, "memory_mode": "forever"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_continue_chat_copies_settings_and_links_the_source(client, chat):
+    persona = models.Persona.objects.create(name="Pirate", system_prompt="Arr.")
+    chat.persona = persona
+    chat.num_ctx = 16384
+    chat.memory_mode = "summarize"
+    chat.save(update_fields=["persona", "num_ctx", "memory_mode"])
+
+    response = client.post(
+        f"/chat-continue/{chat.ai_model.model}", data=json.dumps({"chat_id": chat.id}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 201
+    continued = models.ChatHistory.objects.get(id=response.json()["id"])
+    assert continued.seed_source_id == chat.id
+    assert continued.persona_id == persona.id
+    assert continued.num_ctx == 16384
+    assert continued.memory_mode == "summarize"
+    assert continued.title == "Test chat (continued)"
+
+
+def test_chat_context_estimates_memory_use_before_sending(client, chat, monkeypatch):
+    from django_app import functions
+
+    monkeypatch.setattr(functions, "get_model_context_length", lambda model, params: 4096)
+    user = models.ChatMessage.objects.create(chat=chat, role="user", content="word " * 700)
+    reply = models.ChatMessage.objects.create(chat=chat, parent=user, role="assistant", content="ok")
+    chat.active_leaf = reply
+    chat.save(update_fields=["active_leaf"])
+
+    response = client.get(f"/chat-context/{chat.ai_model.model}/{chat.id}?parameters=8b")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["limit"] == 4096
+    assert body["model_max"] == 4096
+    assert body["preset"] == "short"
+    assert 1000 < body["used"] < 1100
+    assert body["presets"]["standard"] == 8192
 
 
 def test_get_all_chats_persona_null_when_unset(client, chat):

@@ -3,12 +3,13 @@ import base64
 import binascii
 import json
 import logging
+import typing
 
 from asgiref.sync import sync_to_async
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-from . import functions, models
+from . import context_window, functions, models
 from .functions import ModelUnavailableError
 from .rag import retrieval as rag_retrieval
 
@@ -282,26 +283,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
         full_response = ""
         stats: functions.GenerationStats = {}
         citations: list[rag_retrieval.Citation] = []
+        context_report: context_window.ContextReport | None = None
         # Plain columns on the already-fetched row — no query, safe to read
         # directly in this async method (unlike get_persona_system_prompt's
         # `.persona` access, which needs a real query when a persona is set).
         generation_params = functions.get_generation_params(chat_history)
 
         def finalize_stats() -> dict | None:
-            if not stats:
+            return dict(stats) if stats else None
+
+        def finalize_context() -> dict | None:
+            if context_report is None:
                 return None
-
-            # Context-window usage is only meaningful when the chat has an
-            # explicit num_ctx override — Ollama's actual default varies by
-            # model and isn't something this app queries.
-            num_ctx = generation_params.get("num_ctx")
-            if num_ctx:
-                stats["context_limit"] = num_ctx
-                stats["context_used"] = stats.get("prompt_tokens", 0) + stats.get(
-                    "completion_tokens", 0
-                )
-
-            return dict(stats)
+            # The prompt side is our estimate — Ollama's prompt_eval_count
+            # only counts tokens it didn't have cached, so it undercounts
+            # every turn after the first. The reply side is exact.
+            return {**context_report, "used": context_report["used"] + stats.get("completion_tokens", 0)}
 
         async def persist(content: str) -> None:
             # Regenerate and edit-resend both branch a new leaf onto the
@@ -358,9 +355,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # Sent before the answer starts, so the user knows up front that
             # it's being written without some of their documents.
             for warning in rag_warnings:
-                await self.send(text_data=json.dumps({"notice": warning, "done": False}))
-            system_prompt = (
-                "\n\n".join(p for p in (persona_prompt, rag_context) if p) or None
+                await self._send_notice(warning)
+            system_prompt, history_messages, context_report = await self._fit_to_memory(
+                ai_model,
+                ai_model_parameters,
+                chat_history,
+                persona_prompt,
+                rag_context,
+                history_messages,
+                {"role": "user", "content": user_prompt, "image": image},
+                generation_params,
             )
             # MCP servers are global, not per-chat (see models.MCPServer) — only
             # worth a query when the tool path is actually going to run.
@@ -439,6 +443,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             done_payload = {"message": full_response, "done": True}
             if (final_stats := finalize_stats()) is not None:
                 done_payload["stats"] = final_stats
+            if (final_context := finalize_context()) is not None:
+                done_payload["context"] = final_context
             if citations:
                 done_payload["citations"] = citations
             await self.send(text_data=json.dumps(done_payload))
@@ -460,6 +466,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             stopped_payload = {"message": "", "done": True, "stopped": True}
             if (final_stats := finalize_stats()) is not None:
                 stopped_payload["stats"] = final_stats
+            if (final_context := finalize_context()) is not None:
+                stopped_payload["context"] = final_context
             await self.send(text_data=json.dumps(stopped_payload))
         except ModelUnavailableError as e:
             logger.warning("Model unavailable in WebSocket receive: %s", e)
@@ -467,6 +475,83 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Exception:
             logger.exception("Unexpected error in ChatConsumer._generate")
             await self._send_error("An unexpected error occurred. Please try again.")
+
+    async def _fit_to_memory(
+        self,
+        ai_model: models.AIModel,
+        parameters: str,
+        chat_history: models.ChatHistory,
+        persona_prompt: str | None,
+        rag_context: str,
+        history: list[dict[str, typing.Any]],
+        new_message: dict[str, typing.Any],
+        generation_params: functions.GenerationParams,
+    ) -> tuple[str | None, list[dict[str, typing.Any]], context_window.ContextReport]:
+        """Decides the context size and what history fits in it (see
+        context_window.py). Sets generation_params["num_ctx"] explicitly so the
+        window the UI reports is the one Ollama actually uses. In summarize
+        mode, messages that no longer fit are folded into the chat's running
+        summary instead of silently vanishing.
+
+        Summaries go between the persona and the retrieved documents, so the
+        persona leads and the documents sit closest to the question.
+        """
+        model_max = await sync_to_async(functions.get_model_context_length, thread_sensitive=False)(
+            ai_model.model, parameters
+        )
+        num_ctx = context_window.resolve_num_ctx(chat_history.num_ctx, model_max)
+        generation_params["num_ctx"] = num_ctx
+        summarize_mode = chat_history.memory_mode == models.ChatHistory.MEMORY_MODE_SUMMARIZE
+
+        if chat_history.seed_source_id and not chat_history.seed_summary:
+            source_history = await database_sync_to_async(functions.get_seed_source_history)(chat_history)
+            if source_history:
+                await self._send_notice("Summarizing your previous chat so this one can pick up where it left off…")
+                chat_history.seed_summary = await functions.asummarize_conversation(
+                    ai_model, parameters, "", source_history, num_ctx
+                )
+                await database_sync_to_async(functions.save_seed_summary)(chat_history, chat_history.seed_summary)
+
+        memory_summary = ""
+        history_ids = [m.get("id") for m in history]
+        if summarize_mode and chat_history.memory_summary and chat_history.memory_summary_until_id in history_ids:
+            memory_summary = chat_history.memory_summary
+            history = history[history_ids.index(chat_history.memory_summary_until_id) + 1:]
+
+        def system_prompt() -> str | None:
+            blocks = [persona_prompt]
+            if chat_history.seed_summary:
+                blocks.append(context_window.summary_system_block(chat_history.seed_summary, carried_over=True))
+            if memory_summary:
+                blocks.append(context_window.summary_system_block(memory_summary, carried_over=False))
+            blocks.append(rag_context)
+            return "\n\n".join(b for b in blocks if b) or None
+
+        fit = context_window.fit_history(system_prompt(), history, new_message, num_ctx)
+
+        if fit.dropped and summarize_mode:
+            to_fold = history[:fit.dropped]
+            await self._send_notice(
+                "This conversation is longer than the model's memory, so older messages are being summarized first…"
+            )
+            memory_summary = await functions.asummarize_conversation(
+                ai_model, parameters, memory_summary, to_fold, num_ctx
+            )
+            await database_sync_to_async(functions.save_memory_summary)(chat_history, memory_summary, to_fold[-1]["id"])
+            fit = context_window.fit_history(system_prompt(), history[fit.dropped:], new_message, num_ctx)
+
+        report: context_window.ContextReport = {
+            "limit": num_ctx,
+            "used": fit.estimated_prompt_tokens,
+            "model_max": model_max,
+            "preset": context_window.preset_for(num_ctx),
+            "dropped": fit.dropped,
+            "summarized": bool(memory_summary),
+        }
+        return system_prompt(), fit.history, report
+
+    async def _send_notice(self, notice: str) -> None:
+        await self.send(text_data=json.dumps({"notice": notice, "done": False}))
 
     @staticmethod
     def _load_history(chat_history) -> list[dict[str, str]]:

@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from helpers import decorators
 
-from . import functions, models, serializers
+from . import context_window, functions, models, serializers
 from .catalog import sync as catalog_sync
 from .mcp_integration import client as mcp_client
 from .rag import extract as rag_extract
@@ -528,8 +528,9 @@ class AllChats(APIView):
             .only(
                 "id", "title", "persona__id", "persona__name",
                 "temperature", "num_ctx", "top_p", "seed", "tools_enabled",
+                "memory_mode", "seed_summary", "seed_source__id", "seed_source__title",
             )
-            .select_related("persona")
+            .select_related("persona", "seed_source")
             .prefetch_related("active_collections")
         )
 
@@ -546,6 +547,10 @@ class AllChats(APIView):
                     {"id": c.id, "name": c.name} for c in chat.active_collections.all()
                 ],
                 "tools_enabled": chat.tools_enabled,
+                "memory_mode": chat.memory_mode,
+                "continued_from": (
+                    {"id": chat.seed_source.id, "title": chat.seed_source.title} if chat.seed_source else None
+                ),
             }
             for chat in chat_histories
         ]
@@ -620,12 +625,13 @@ class AllChats(APIView):
     _GENERATION_PARAM_BOUNDS: dict[str, tuple[type, float | None, float | None]] = {
         "temperature": (float, 0.0, 2.0),
         "top_p": (float, 0.0, 1.0),
-        "num_ctx": (int, 1, None),
+        # Below ~1k there's no room for even one exchange plus the reply.
+        "num_ctx": (int, 1024, None),
         "seed": (int, None, None),
     }
 
     _UPDATABLE_CHAT_FIELDS = {
-        "title", "persona_id", "collection_ids", "tools_enabled", *_GENERATION_PARAM_BOUNDS,
+        "title", "persona_id", "collection_ids", "tools_enabled", "memory_mode", *_GENERATION_PARAM_BOUNDS,
     }
 
     @decorators.required_body_params(["id"])
@@ -704,6 +710,19 @@ class AllChats(APIView):
             chat_history.tools_enabled = tools_enabled
             update_fields.append("tools_enabled")
 
+        if "memory_mode" in request_data:
+            memory_mode = request_data["memory_mode"]
+            valid_modes = {choice for choice, _ in models.ChatHistory.MEMORY_MODE_CHOICES}
+
+            if memory_mode not in valid_modes:
+                return Response(
+                    {"error": f"memory_mode must be one of {sorted(valid_modes)}"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            chat_history.memory_mode = memory_mode
+            update_fields.append("memory_mode")
+
         for field, (expected_type, min_value, max_value) in self._GENERATION_PARAM_BOUNDS.items():
             if field not in request_data:
                 continue
@@ -742,3 +761,81 @@ class AllChats(APIView):
         )
 
 
+class ContinueChat(APIView):
+    """"Start fresh with a summary": a new chat with the same settings whose
+    first reply carries a summary of this one (generated then, in the
+    consumer — summarizing can outlast an HTTP request on CPU)."""
+
+    @decorators.required_body_params(["chat_id"])
+    def post(self, request: Request, model: str) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+
+        if (ai_model := models.AIModel.objects.filter(model=model).first()) is None:
+            return Response({"error": "AI model not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if (source := functions.get_chat_history(ai_model, str(request_data["chat_id"]))) is None:
+            return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        continued = models.ChatHistory.objects.create(
+            ai_model=ai_model,
+            title=f"{source.title} (continued)",
+            persona=source.persona,
+            temperature=source.temperature,
+            num_ctx=source.num_ctx,
+            top_p=source.top_p,
+            seed=source.seed,
+            tools_enabled=source.tools_enabled,
+            memory_mode=source.memory_mode,
+            seed_source=source,
+        )
+        continued.active_collections.set(source.active_collections.all())
+
+        return Response({"id": continued.id, "title": continued.title}, status=status.HTTP_201_CREATED)
+
+
+class ChatContext(APIView):
+    """How full the chat's memory is right now, before anything is sent —
+    the same estimate the consumer makes, minus document excerpts (those
+    depend on the next question)."""
+
+    def get(self, request: Request, model: str, chat_id: str) -> Response:
+        if (ai_model := models.AIModel.objects.filter(model=model).first()) is None:
+            return Response({"error": "AI model not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if (chat_history := functions.get_chat_history(ai_model, chat_id)) is None:
+            return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        parameters = request.query_params.get("parameters", "")
+        model_max = functions.get_model_context_length(model, parameters) if parameters else None
+        num_ctx = context_window.resolve_num_ctx(chat_history.num_ctx, model_max)
+
+        history = functions.deserialize_messages(functions.get_messages_for_chat(chat_history))
+        summary_blocks = [chat_history.seed_summary]
+        history_ids = [m["id"] for m in history]
+        summarized = (
+            chat_history.memory_mode == models.ChatHistory.MEMORY_MODE_SUMMARIZE
+            and bool(chat_history.memory_summary)
+            and chat_history.memory_summary_until_id in history_ids
+        )
+        if summarized:
+            history = history[history_ids.index(chat_history.memory_summary_until_id) + 1:]
+            summary_blocks.append(chat_history.memory_summary)
+
+        system_prompt = "\n\n".join(
+            p for p in (functions.get_persona_system_prompt(chat_history), *summary_blocks) if p
+        )
+        fit = context_window.fit_history(system_prompt or None, history, {"role": "user", "content": ""}, num_ctx)
+
+        return Response(
+            {
+                "limit": num_ctx,
+                "used": fit.estimated_prompt_tokens,
+                "model_max": model_max,
+                "preset": context_window.preset_for(num_ctx),
+                "dropped": fit.dropped,
+                "summarized": summarized,
+                "presets": context_window.MEMORY_PRESETS,
+                "tokens_per_page": context_window.TOKENS_PER_PAGE,
+            },
+            status=status.HTTP_200_OK,
+        )

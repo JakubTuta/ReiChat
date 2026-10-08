@@ -56,6 +56,19 @@ async def _close_leaked_db_connection():
     await database_sync_to_async(connections.close_all)()
 
 
+@pytest.fixture(autouse=True)
+def _no_model_context_lookup(monkeypatch):
+    # The real lookup asks the model's Ollama container for its maximum
+    # context; there's no container here. Tests that care override this.
+    monkeypatch.setattr(functions, "get_model_context_length", lambda model_name, parameters: None)
+
+
+def _without_context(frame: dict) -> dict:
+    """Done frames always carry a context report (covered by its own
+    tests below) — strip it where a test is about something else."""
+    return {k: v for k, v in frame.items() if k != "context"}
+
+
 @pytest.fixture
 def chat():
     # The 0004_seed_model_catalog migration pre-populates a real "llama3.1"
@@ -93,7 +106,7 @@ async def test_receive_streams_response_and_persists_history(chat, monkeypatch):
 
     assert await communicator.receive_json_from() == {"message": "Hel", "done": False}
     assert await communicator.receive_json_from() == {"message": "lo", "done": False}
-    assert await communicator.receive_json_from() == {"message": "Hello", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Hello", "done": True}
 
     await communicator.disconnect()
 
@@ -130,7 +143,7 @@ async def test_receive_passes_chat_persona_system_prompt_to_astream(chat, monkey
     )
 
     assert await communicator.receive_json_from() == {"message": "Arr", "done": False}
-    assert await communicator.receive_json_from() == {"message": "Arr", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Arr", "done": True}
 
     await communicator.disconnect()
 
@@ -161,74 +174,189 @@ async def test_receive_passes_chat_generation_params_to_astream(chat, monkeypatc
     )
 
     assert await communicator.receive_json_from() == {"message": "ok", "done": False}
-    assert await communicator.receive_json_from() == {"message": "ok", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "ok", "done": True}
 
     await communicator.disconnect()
 
     assert received_params == {"temperature": 0.9, "num_ctx": 8192, "top_p": 0.5, "seed": 7}
 
 
-async def test_receive_includes_generation_stats_with_context_usage_when_num_ctx_set(chat, monkeypatch):
+async def _send_and_collect(chat, message: str = "Hi") -> list[dict]:
+    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
+    assert (await communicator.connect())[0]
+    await communicator.send_json_to({"message": message, "ai_model": "llama3.1", "ai_model_parameters": "8b"})
+
+    frames = []
+    while True:
+        frame = await communicator.receive_json_from(timeout=5)
+        frames.append(frame)
+        if frame.get("done"):
+            break
+
+    await communicator.disconnect()
+    return frames
+
+
+def _capturing_astream(captured: dict, stats_values: dict | None = None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+        captured.update(history=history, system_prompt=system_prompt, generation_params=generation_params)
+        yield "Hi"
+        if stats is not None and stats_values:
+            stats.update(stats_values)
+
+    return _fake_astream
+
+
+async def test_done_frame_reports_memory_use_and_keeps_stats_separate(chat, monkeypatch):
     chat.num_ctx = 4096
     await database_sync_to_async(chat.save)(update_fields=["num_ctx"])
-
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
-        yield "Hi"
-        # Mirrors what _record_generation_stats would set from Ollama's
-        # final (done=True) streamed chunk.
-        if stats is not None:
-            stats["prompt_tokens"] = 10
-            stats["completion_tokens"] = 20
-            stats["tokens_per_second"] = 50.0
-
-    monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
-
-    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
-    assert (await communicator.connect())[0]
-
-    await communicator.send_json_to(
-        {"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
+    captured: dict = {}
+    monkeypatch.setattr(
+        functions, "astream_bot_response",
+        _capturing_astream(captured, {"prompt_tokens": 10, "completion_tokens": 20, "tokens_per_second": 50.0}),
     )
 
-    assert await communicator.receive_json_from() == {"message": "Hi", "done": False}
-    response = await communicator.receive_json_from()
+    done = (await _send_and_collect(chat))[-1]
 
-    assert response["message"] == "Hi"
-    assert response["done"] is True
-    assert response["stats"] == {
-        "prompt_tokens": 10,
-        "completion_tokens": 20,
-        "tokens_per_second": 50.0,
-        "context_limit": 4096,
-        "context_used": 30,
-    }
-
-    await communicator.disconnect()
+    assert done["stats"] == {"prompt_tokens": 10, "completion_tokens": 20, "tokens_per_second": 50.0}
+    assert done["context"]["limit"] == 4096
+    assert done["context"]["preset"] == "short"
+    assert done["context"]["dropped"] == 0
+    assert done["context"]["summarized"] is False
+    # Estimated prompt plus the exact completion count.
+    assert done["context"]["used"] > 20
+    assert captured["generation_params"]["num_ctx"] == 4096
 
 
-async def test_receive_omits_context_usage_without_num_ctx_override(chat, monkeypatch):
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
-        yield "Hi"
-        if stats is not None:
-            stats["prompt_tokens"] = 10
-            stats["completion_tokens"] = 20
+async def test_without_a_chosen_length_the_standard_preset_is_requested_explicitly(chat, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
 
-    monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
+    done = (await _send_and_collect(chat))[-1]
 
-    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
-    assert (await communicator.connect())[0]
+    assert captured["generation_params"]["num_ctx"] == 8192
+    assert done["context"]["preset"] == "standard"
 
-    await communicator.send_json_to(
-        {"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
+
+async def test_memory_never_exceeds_what_the_model_supports(chat, monkeypatch):
+    chat.num_ctx = 32768
+    await database_sync_to_async(chat.save)(update_fields=["num_ctx"])
+    monkeypatch.setattr(functions, "get_model_context_length", lambda model_name, parameters: 2048)
+    captured: dict = {}
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
+
+    done = (await _send_and_collect(chat))[-1]
+
+    assert captured["generation_params"]["num_ctx"] == 2048
+    assert done["context"]["model_max"] == 2048
+
+
+async def _make_long_history(chat, turns: int, words: int = 400) -> None:
+    def _build():
+        parent = None
+        for i in range(turns):
+            user = models.ChatMessage.objects.create(
+                chat=chat, parent=parent, role="user", content=f"question {i} " + "word " * words
+            )
+            parent = models.ChatMessage.objects.create(
+                chat=chat, parent=user, role="assistant", content=f"answer {i} " + "word " * words
+            )
+        chat.active_leaf = parent
+        chat.save(update_fields=["active_leaf"])
+
+    await database_sync_to_async(_build)()
+
+
+async def test_trim_mode_leaves_out_the_oldest_messages_and_says_how_many(chat, monkeypatch):
+    chat.num_ctx = 4096
+    await database_sync_to_async(chat.save)(update_fields=["num_ctx"])
+    await _make_long_history(chat, turns=10)
+    captured: dict = {}
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
+
+    done = (await _send_and_collect(chat))[-1]
+
+    assert done["context"]["dropped"] > 0
+    assert len(captured["history"]) == 20 - done["context"]["dropped"]
+    assert captured["history"][0]["role"] == "user"
+    assert captured["history"][-1]["content"].startswith("answer 9")
+
+
+async def test_summarize_mode_folds_dropped_messages_into_a_saved_summary(chat, monkeypatch):
+    chat.num_ctx = 4096
+    chat.memory_mode = models.ChatHistory.MEMORY_MODE_SUMMARIZE
+    await database_sync_to_async(chat.save)(update_fields=["num_ctx", "memory_mode"])
+    await _make_long_history(chat, turns=10)
+    captured: dict = {}
+    folded: list = []
+
+    async def _fake_summarize(model, parameters, previous_summary, messages, num_ctx):
+        folded.extend(messages)
+        return "The user asked ten long questions."
+
+    monkeypatch.setattr(functions, "asummarize_conversation", _fake_summarize)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
+
+    frames = await _send_and_collect(chat)
+    done = frames[-1]
+
+    assert any("summarized" in f.get("notice", "") for f in frames)
+    assert done["context"]["summarized"] is True
+    assert "The user asked ten long questions." in captured["system_prompt"]
+    assert folded[0]["content"].startswith("question 0")
+    assert len(folded) + len(captured["history"]) == 20
+
+    await database_sync_to_async(chat.refresh_from_db)()
+    assert chat.memory_summary == "The user asked ten long questions."
+    assert chat.memory_summary_until_id == folded[-1]["id"]
+
+
+async def test_existing_summary_is_reused_without_summarizing_again(chat, monkeypatch):
+    chat.num_ctx = 4096
+    chat.memory_mode = models.ChatHistory.MEMORY_MODE_SUMMARIZE
+    await database_sync_to_async(chat.save)(update_fields=["num_ctx", "memory_mode"])
+    await _make_long_history(chat, turns=3, words=20)
+
+    first_answer = await database_sync_to_async(
+        lambda: models.ChatMessage.objects.filter(chat=chat, content__startswith="answer 0").get()
+    )()
+    chat.memory_summary = "Earlier: greetings."
+    chat.memory_summary_until = first_answer
+    await database_sync_to_async(chat.save)(update_fields=["memory_summary", "memory_summary_until"])
+
+    async def _must_not_summarize(*args, **kwargs):
+        raise AssertionError("summarized again")
+
+    captured: dict = {}
+    monkeypatch.setattr(functions, "asummarize_conversation", _must_not_summarize)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
+
+    done = (await _send_and_collect(chat))[-1]
+
+    assert done["context"]["summarized"] is True
+    assert "Earlier: greetings." in captured["system_prompt"]
+    assert captured["history"][0]["content"].startswith("question 1")
+
+
+async def test_continued_chat_summarizes_its_source_on_the_first_message(chat, monkeypatch):
+    await _make_long_history(chat, turns=2, words=10)
+    continued = await database_sync_to_async(models.ChatHistory.objects.create)(
+        ai_model=chat.ai_model, title="Continued", seed_source=chat
     )
 
-    assert await communicator.receive_json_from() == {"message": "Hi", "done": False}
-    response = await communicator.receive_json_from()
+    async def _fake_summarize(model, parameters, previous_summary, messages, num_ctx):
+        return f"Summary of {len(messages)} messages."
 
-    assert response["stats"] == {"prompt_tokens": 10, "completion_tokens": 20}
-    assert "context_used" not in response["stats"]
+    captured: dict = {}
+    monkeypatch.setattr(functions, "asummarize_conversation", _fake_summarize)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
 
-    await communicator.disconnect()
+    frames = await _send_and_collect(continued)
+
+    assert any("previous chat" in f.get("notice", "") for f in frames)
+    assert "Summary of 4 messages." in captured["system_prompt"]
+    await database_sync_to_async(continued.refresh_from_db)()
+    assert continued.seed_summary == "Summary of 4 messages."
 
 
 async def test_receive_omits_stats_key_entirely_when_nothing_was_reported(chat, monkeypatch):
@@ -247,7 +375,7 @@ async def test_receive_omits_stats_key_entirely_when_nothing_was_reported(chat, 
     assert await communicator.receive_json_from() == {"message": "Hi", "done": False}
     response = await communicator.receive_json_from()
 
-    assert response == {"message": "Hi", "done": True}
+    assert _without_context(response) == {"message": "Hi", "done": True}
     assert "stats" not in response
 
     await communicator.disconnect()
@@ -384,7 +512,7 @@ async def test_stop_cancels_in_flight_generation_and_persists_partial_response(c
     await communicator.send_json_to({"type": "stop"})
     response = await communicator.receive_json_from()
 
-    assert response == {"message": "", "done": True, "stopped": True}
+    assert _without_context(response) == {"message": "", "done": True, "stopped": True}
 
     messages = await database_sync_to_async(list)(
         models.ChatMessage.objects.filter(chat=chat).order_by("created_at")
@@ -430,7 +558,7 @@ async def test_prompt_while_generating_is_rejected_instead_of_queued(chat, monke
     assert response == {"error": "A response is already generating. Stop it first.", "done": True}
 
     hang.set()
-    assert await communicator.receive_json_from() == {"message": "Hel", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Hel", "done": True}
     await communicator.disconnect()
 
 
@@ -455,7 +583,7 @@ async def _send_first_turn(communicator, monkeypatch, reply="Hello"):
         {"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
     )
     assert await communicator.receive_json_from() == {"message": reply, "done": False}
-    assert await communicator.receive_json_from() == {"message": reply, "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": reply, "done": True}
 
 
 def _active_path_and_all_messages(chat):
@@ -487,7 +615,7 @@ async def test_regenerate_replaces_last_assistant_message_and_keeps_user_message
         {"type": "regenerate", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
     )
     assert await communicator.receive_json_from() == {"message": "Better hello", "done": False}
-    assert await communicator.receive_json_from() == {"message": "Better hello", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Better hello", "done": True}
 
     active_path, all_messages = await database_sync_to_async(_active_path_and_all_messages)(chat)
 
@@ -569,7 +697,7 @@ async def test_regenerate_while_generating_is_rejected(chat, monkeypatch):
     assert response == {"error": "A response is already generating. Stop it first.", "done": True}
 
     hang.set()
-    assert await communicator.receive_json_from() == {"message": "Hel", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Hel", "done": True}
     await communicator.disconnect()
 
 
@@ -587,7 +715,7 @@ async def test_edit_resend_replaces_edited_message_and_discards_everything_after
         {"message": "How are you", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
     )
     assert await communicator.receive_json_from() == {"message": "I'm good", "done": False}
-    assert await communicator.receive_json_from() == {"message": "I'm good", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "I'm good", "done": True}
 
     async def _fake_edit(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
         # History must stop before the edited message — the model shouldn't
@@ -609,7 +737,7 @@ async def test_edit_resend_replaces_edited_message_and_discards_everything_after
         }
     )
     assert await communicator.receive_json_from() == {"message": "Hi yourself", "done": False}
-    assert await communicator.receive_json_from() == {"message": "Hi yourself", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Hi yourself", "done": True}
 
     active_path, all_messages = await database_sync_to_async(_active_path_and_all_messages)(chat)
 
@@ -732,7 +860,7 @@ async def test_edit_resend_while_generating_is_rejected(chat, monkeypatch):
     assert response == {"error": "A response is already generating. Stop it first.", "done": True}
 
     hang.set()
-    assert await communicator.receive_json_from() == {"message": "Hel", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "Hel", "done": True}
     await communicator.disconnect()
 
 
@@ -775,7 +903,7 @@ async def test_receive_uses_tool_path_when_chat_and_model_both_allow_it(tools_ch
         "done": False,
     }
     assert await communicator.receive_json_from() == {"message": "The answer is 4.", "done": False}
-    assert await communicator.receive_json_from() == {"message": "The answer is 4.", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "The answer is 4.", "done": True}
 
     await communicator.disconnect()
 
@@ -807,7 +935,7 @@ async def test_receive_ignores_tools_enabled_when_model_lacks_tools_capability(c
     await communicator.send_json_to({"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"})
 
     assert await communicator.receive_json_from() == {"message": "plain reply", "done": False}
-    assert await communicator.receive_json_from() == {"message": "plain reply", "done": True}
+    assert _without_context(await communicator.receive_json_from()) == {"message": "plain reply", "done": True}
 
     await communicator.disconnect()
 

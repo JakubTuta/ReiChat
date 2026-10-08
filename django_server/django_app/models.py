@@ -104,6 +104,30 @@ class ChatHistory(models.Model):
     # allowed for this chat once the model supports them.
     tools_enabled = models.BooleanField(default=False)
 
+    MEMORY_MODE_TRIM = "trim"
+    MEMORY_MODE_SUMMARIZE = "summarize"
+    MEMORY_MODE_CHOICES = [
+        (MEMORY_MODE_TRIM, "Forget the oldest messages"),
+        (MEMORY_MODE_SUMMARIZE, "Summarize older messages"),
+    ]
+    # What happens once the conversation outgrows the context window — see
+    # context_window.py.
+    memory_mode = models.TextField(choices=MEMORY_MODE_CHOICES, default=MEMORY_MODE_TRIM)
+    # Running summary of the oldest messages, in summarize mode. Valid only
+    # while memory_summary_until (the last message it covers) is still on the
+    # active path — switching to a branch that diverged earlier discards it.
+    memory_summary = models.TextField(default="", blank=True)
+    memory_summary_until = models.ForeignKey(
+        "ChatMessage", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    # "Start fresh with a summary": the chat this one continues. Its summary
+    # is generated on this chat's first message (it can take a while on CPU,
+    # longer than an HTTP request should) and then kept in seed_summary.
+    seed_source = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="continuations"
+    )
+    seed_summary = models.TextField(default="", blank=True)
+
     def __str__(self) -> str:
         return self.title
 
