@@ -67,6 +67,29 @@ def list_models(base_url: str) -> list[dict[str, typing.Any]]:
     return listed
 
 
+def register_models(base_url: str) -> int:
+    """Makes every model already on the user's Ollama selectable: one that
+    the ollama.com catalog doesn't list (or a tag it doesn't list) is added
+    as a custom model. Returns how many entries were added."""
+    from django_app.catalog import registry
+    from django_app.models import AIModel, AIModelVersion
+
+    added = 0
+    for name, size in (ollama_api.installed_model_sizes(base_url) or {}).items():
+        model, _, parameters = name.partition(":")
+        ai_model, created = AIModel.objects.get_or_create(
+            model=model,
+            defaults={"name": model.rsplit("/", 1)[-1], "description": "Found on your Ollama.", "is_custom": True},
+        )
+        _, version_created = AIModelVersion.objects.get_or_create(
+            ai_model=ai_model,
+            parameters=parameters or "latest",
+            defaults={"size": registry.format_size(size), "size_bytes": size},
+        )
+        added += int(created or version_created)
+    return added
+
+
 def has_model(base_url: str, model: str, parameters: str) -> bool | None:
     sizes = ollama_api.installed_model_sizes(base_url)
     if sizes is None:

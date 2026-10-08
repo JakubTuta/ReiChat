@@ -140,3 +140,20 @@ def test_health_check_reports_the_external_server(client, external_mode, monkeyp
 
     assert response.status_code == 503
     assert "Can't reach your Ollama" in response.json()["error"]
+
+
+@pytest.mark.django_db
+def test_models_already_on_the_users_ollama_become_selectable(monkeypatch):
+    models.AIModel.objects.create(name="llama3.2", model="llama3.2-reg-test", index=1)
+    monkeypatch.setattr(
+        external.ollama_api, "installed_model_sizes",
+        lambda url: {"llama3.2-reg-test:3b": 2_000_000_000, "brand-new-model:latest": 1_000},
+    )
+
+    assert external.register_models(EXTERNAL) == 2
+
+    assert models.AIModelVersion.objects.filter(ai_model__model="llama3.2-reg-test", parameters="3b").exists()
+    new = models.AIModel.objects.get(model="brand-new-model")
+    assert new.is_custom is True
+    assert new.versions.get().size_bytes == 1_000
+    assert external.register_models(EXTERNAL) == 0

@@ -45,7 +45,8 @@ class Containers(APIView):
     def get(self, request) -> Response:
         docker_client = ContainerManager()
 
-        if external.url() is not None:
+        if (external_url := external.url()) is not None:
+            external.register_models(external_url)
             return Response(docker_client.get_available_containers(), status=status.HTTP_200_OK)
 
         if not docker_client.is_connected() and not docker_client.connect_to_docker():
@@ -269,6 +270,7 @@ class OllamaConnection(APIView):
             )
 
         app_settings.set_external_ollama_url(url)
+        external.register_models(url)
         return Response({"mode": "external", "url": url, "version": found}, status=status.HTTP_200_OK)
 
 
