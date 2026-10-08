@@ -9,3 +9,7 @@ export interface IMCPServer {
   enabled: boolean
   created_at: string
 }
+
+export type MCPTestResult
+  = | { ok: true, tools: { name: string, description: string }[] }
+    | { ok: false, error: string }

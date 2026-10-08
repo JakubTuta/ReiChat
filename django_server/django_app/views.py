@@ -1,6 +1,7 @@
 import logging
 import threading
 
+from asgiref.sync import async_to_sync
 from django.db import close_old_connections
 from django.db.models import Count, Q
 from rest_framework import status
@@ -13,6 +14,7 @@ from helpers import decorators
 
 from . import functions, models, serializers
 from .catalog import sync as catalog_sync
+from .mcp_integration import client as mcp_client
 from .rag import extract as rag_extract
 from .rag import ingest as rag_ingest
 
@@ -419,6 +421,26 @@ class MCPServers(APIView):
             return "url is required for an http server"
 
         return None
+
+
+class MCPServerTest(APIView):
+    @decorators.required_body_params(["id"])
+    def post(self, request: Request) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+
+        server = models.MCPServer.objects.filter(id=request_data["id"]).first()
+        if server is None:
+            return Response({"error": "MCP server not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            tools = async_to_sync(mcp_client.probe_server_tools)(server)
+        except mcp_client.MCPToolError as e:
+            return Response({"error": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(
+            {"tools": [{"name": t["name"], "description": t["description"]} for t in tools]},
+            status=status.HTTP_200_OK,
+        )
 
 
 class Search(APIView):

@@ -174,3 +174,42 @@ def test_build_tool_registry_empty_input_returns_empty_registry():
 
     assert registry.tool_specs == []
     assert registry.lookup == {}
+
+
+async def test_probe_explains_a_command_missing_from_the_backend_image(stdio_server, monkeypatch):
+    stdio_server.command = "npx -y @modelcontextprotocol/server-everything"
+
+    @contextlib.asynccontextmanager
+    async def _missing_binary(server):
+        raise ExceptionGroup("task group failed", [FileNotFoundError(2, "No such file or directory")])
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(mcp_client, "_connect", _missing_binary)
+
+    with pytest.raises(mcp_client.MCPToolError, match="'npx' isn't available.*over HTTP"):
+        await mcp_client.probe_server_tools(stdio_server)
+
+
+async def test_probe_explains_a_refused_http_connection(http_server, monkeypatch):
+    @contextlib.asynccontextmanager
+    async def _refused(server):
+        raise ConnectionRefusedError("connection refused")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(mcp_client, "_connect", _refused)
+
+    with pytest.raises(mcp_client.MCPToolError, match="Couldn't connect to 'http://localhost:9000/mcp'"):
+        await mcp_client.probe_server_tools(http_server)
+
+
+async def test_list_server_tools_gives_up_on_a_hanging_server(stdio_server, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(mcp_client, "LIST_TOOLS_TIMEOUT_SECONDS", 0.05)
+
+    async def _hang(server):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(mcp_client, "_fetch_tools", _hang)
+
+    assert await mcp_client.list_server_tools(stdio_server) == []

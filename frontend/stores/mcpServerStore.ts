@@ -1,4 +1,4 @@
-import type { IMCPServer, MCPTransport } from '~/models/mcpServer'
+import type { IMCPServer, MCPTestResult, MCPTransport } from '~/models/mcpServer'
 
 export const useMCPServerStore = defineStore('mcpServer', () => {
   const servers = ref<IMCPServer[]>([])
@@ -26,11 +26,35 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
     }
   }
 
+  const testResults = ref<Record<number, MCPTestResult>>({})
+  const testingId = ref<number | null>(null)
+
+  const testServer = async (id: number): Promise<MCPTestResult> => {
+    testingId.value = id
+    let result: MCPTestResult
+
+    try {
+      const response = await api.value.post('mcp-servers/test/', { id })
+      result = { ok: true, tools: response.data.tools }
+    }
+    catch (error: any) {
+      console.error(error)
+      result = { ok: false, error: error.response?.data?.error || 'Could not test the MCP server.' }
+    }
+    finally {
+      testingId.value = null
+    }
+
+    testResults.value = { ...testResults.value, [id]: result }
+
+    return result
+  }
+
   const createServer = async (
     name: string,
     transport: MCPTransport,
     commandOrUrl: string,
-  ): Promise<boolean> => {
+  ): Promise<IMCPServer | null> => {
     try {
       const response = await api.value.post('mcp-servers/', {
         name,
@@ -43,7 +67,7 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
       if (response?.status === 201) {
         servers.value = [...servers.value, response.data].sort((a, b) => a.name.localeCompare(b.name))
 
-        return true
+        return response.data
       }
     }
     catch (error: any) {
@@ -51,7 +75,7 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
       snackbarStore.showSnackbarError(error.response?.data?.error || 'Failed to create MCP server.')
     }
 
-    return false
+    return null
   }
 
   const setServerEnabled = async (id: number, enabled: boolean): Promise<boolean> => {
@@ -95,6 +119,9 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
   return {
     servers,
     loading,
+    testResults,
+    testingId,
+    testServer,
     fetchServers,
     createServer,
     setServerEnabled,

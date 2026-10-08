@@ -17,4 +17,5 @@ urlpatterns: list[URLPattern] = [
     path("collections/", views.Collections.as_view(), name="collections"),
     path("documents/", views.Documents.as_view(), name="documents"),
     path("mcp-servers/", views.MCPServers.as_view(), name="mcp_servers"),
+    path("mcp-servers/test/", views.MCPServerTest.as_view(), name="mcp_server_test"),
 ]

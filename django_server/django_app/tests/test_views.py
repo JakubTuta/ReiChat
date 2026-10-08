@@ -952,3 +952,35 @@ def test_delete_mcp_server_not_found_returns_404(client):
     )
 
     assert response.status_code == 404
+
+
+def test_mcp_server_test_lists_tools(client, monkeypatch):
+    from django_app import views
+
+    server = models.MCPServer.objects.create(name="Probe OK", transport=models.MCPServer.TRANSPORT_HTTP, url="http://x/mcp")
+
+    async def _probe(srv):
+        return [{"name": "search", "description": "Search", "input_schema": {}}]
+
+    monkeypatch.setattr(views.mcp_client, "probe_server_tools", _probe)
+
+    response = client.post("/mcp-servers/test/", data=json.dumps({"id": server.id}), content_type="application/json")
+
+    assert response.status_code == 200
+    assert response.json() == {"tools": [{"name": "search", "description": "Search"}]}
+
+
+def test_mcp_server_test_reports_the_reason_it_failed(client, monkeypatch):
+    from django_app import views
+
+    server = models.MCPServer.objects.create(name="Probe bad", transport=models.MCPServer.TRANSPORT_STDIO, command="npx x")
+
+    async def _probe(srv):
+        raise views.mcp_client.MCPToolError("The command 'npx' isn't available.")
+
+    monkeypatch.setattr(views.mcp_client, "probe_server_tools", _probe)
+
+    response = client.post("/mcp-servers/test/", data=json.dumps({"id": server.id}), content_type="application/json")
+
+    assert response.status_code == 502
+    assert response.json() == {"error": "The command 'npx' isn't available."}

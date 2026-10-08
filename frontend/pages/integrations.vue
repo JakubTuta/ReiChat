@@ -2,7 +2,7 @@
 import type { MCPTransport } from '~/models/mcpServer'
 
 const mcpServerStore = useMCPServerStore()
-const { servers, loading } = storeToRefs(mcpServerStore)
+const { servers, loading, testResults, testingId } = storeToRefs(mcpServerStore)
 
 const deleteConfirmDialog = ref(false)
 const serverToDelete = ref<{ id: number, name: string } | null>(null)
@@ -35,15 +35,36 @@ async function submitCreate() {
     return
 
   saving.value = true
-  const succeeded = await mcpServerStore.createServer(name, newTransport.value, commandOrUrl)
+  const created = await mcpServerStore.createServer(name, newTransport.value, commandOrUrl)
   saving.value = false
 
-  if (succeeded)
+  if (created) {
     creating.value = false
+    // Test straight away — a server that can't be reached would otherwise
+    // just contribute no tools, with nothing telling the user why.
+    mcpServerStore.testServer(created.id)
+  }
 }
 
 async function toggleEnabled(server: { id: number, enabled: boolean }) {
   await mcpServerStore.setServerEnabled(server.id, !server.enabled)
+}
+
+function toolSummary(id: number): string {
+  const result = testResults.value[id]
+  if (!result?.ok)
+    return ''
+  if (!result.tools.length)
+    return 'no tools offered'
+
+  const names = result.tools.map(t => t.name)
+  const shown = names.slice(0, 5).join(', ')
+
+  return `${names.length} tool${names.length === 1
+    ? ''
+    : 's'}: ${shown}${names.length > 5
+    ? '…'
+    : ''}`
 }
 
 function requestDelete(server: { id: number, name: string }) {
@@ -123,6 +144,15 @@ function cancelDelete() {
           ? 'STDIO'
           : 'HTTP' }}</span>
 
+        <v-btn
+          size="small"
+          variant="text"
+          :loading="testingId === server.id"
+          @click="mcpServerStore.testServer(server.id)"
+        >
+          Test
+        </v-btn>
+
         <button
           type="button"
           class="server-delete"
@@ -132,6 +162,22 @@ function cancelDelete() {
         >
           Delete
         </button>
+
+        <div
+          v-if="testResults[server.id]"
+          class="server-test"
+          :class="testResults[server.id]!.ok
+            ? 'server-test--ok'
+            : 'server-test--error'"
+        >
+          <template v-if="testResults[server.id]!.ok">
+            Connected · {{ toolSummary(server.id) }}
+          </template>
+
+          <template v-else>
+            {{ (testResults[server.id] as { error: string }).error }}
+          </template>
+        </div>
       </div>
     </div>
 
@@ -168,7 +214,7 @@ function cancelDelete() {
         <v-text-field
           v-model="newCommandOrUrl"
           :label="newTransport === 'stdio'
-            ? 'Command (e.g. `python server.py`)'
+            ? 'Command (runs inside the ReiChat server, which only has Python)'
             : 'URL (e.g. http://localhost:9000/mcp)'"
           density="compact"
           hide-details
@@ -259,6 +305,7 @@ function cancelDelete() {
 
 .server-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
@@ -287,6 +334,21 @@ function cancelDelete() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.server-test {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  padding-left: 52px;
+}
+
+.server-test--ok {
+  color: var(--color-mint-deep);
+}
+
+.server-test--error {
+  color: var(--color-red);
 }
 
 .badge {

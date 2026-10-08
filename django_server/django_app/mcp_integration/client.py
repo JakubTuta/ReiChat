@@ -8,6 +8,7 @@ need its own lifecycle manager for comparatively little benefit at the
 scale this app runs at.
 """
 
+import asyncio
 import logging
 import re
 import shlex
@@ -46,22 +47,72 @@ def _connect(server: models.MCPServer):
     return streamable_http_client(server.url)
 
 
+# A server that hangs on connect (a stdio command waiting on input, an HTTP
+# URL that never answers) must not stall every tools-enabled chat turn.
+LIST_TOOLS_TIMEOUT_SECONDS = 15
+
+
+async def _fetch_tools(server: models.MCPServer) -> list[MCPToolInfo]:
+    async with _connect(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.list_tools()
+
+            return [
+                {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema or {}}
+                for t in result.tools
+            ]
+
+
+def _leaf_exceptions(error: BaseException) -> list[BaseException]:
+    # The MCP client runs on anyio task groups, which wrap the real cause
+    # (a missing binary, a refused connection) in nested ExceptionGroups.
+    if isinstance(error, BaseExceptionGroup):
+        return [leaf for inner in error.exceptions for leaf in _leaf_exceptions(inner)]
+    return [error]
+
+
+def describe_connection_error(server: models.MCPServer, error: BaseException) -> str:
+    leaves = _leaf_exceptions(error)
+
+    for leaf in leaves:
+        if isinstance(leaf, FileNotFoundError):
+            command = shlex.split(server.command)[0] if server.command.strip() else server.command
+            return (
+                f"The command {command!r} isn't available inside the ReiChat server. Local commands run in "
+                "the backend container, which only has Python — tools like npx or uvx aren't installed there. "
+                "Run the MCP server yourself and connect it over HTTP instead."
+            )
+        if isinstance(leaf, TimeoutError):
+            return f"{server.name!r} didn't respond within {LIST_TOOLS_TIMEOUT_SECONDS} seconds."
+        if isinstance(leaf, (ConnectionError, OSError)) or type(leaf).__name__ in ("ConnectError", "ConnectTimeout"):
+            target = server.url or server.command
+            return f"Couldn't connect to {target!r}: {leaf}. Check that the server is running."
+
+    return f"Couldn't talk to {server.name!r}: {leaves[0]}"
+
+
+async def probe_server_tools(server: models.MCPServer) -> list[MCPToolInfo]:
+    """Like list_server_tools, but raises MCPToolError with a plain-language
+    reason — for the Integrations page's "Test" button, where the user needs
+    to see *why* a server contributes no tools."""
+    try:
+        return await asyncio.wait_for(_fetch_tools(server), LIST_TOOLS_TIMEOUT_SECONDS)
+    except MCPToolError:
+        raise
+    except Exception as e:
+        raise MCPToolError(describe_connection_error(server, e)) from e
+
+
 async def list_server_tools(server: models.MCPServer) -> list[MCPToolInfo]:
     """Best-effort — a server that's down or misconfigured returns an empty
-    list (logged) rather than raising, the same resilience RAG's collection
-    lookup has: one broken integration shouldn't stop a chat response.
+    list (logged) rather than raising, so one broken integration doesn't
+    stop a chat response. The Integrations page's Test button
+    (probe_server_tools) is where the user finds out why.
     """
     try:
-        async with _connect(server) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-
-                return [
-                    {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema or {}}
-                    for t in result.tools
-                ]
-    except Exception as e:
+        return await probe_server_tools(server)
+    except MCPToolError as e:
         logger.warning("Could not list tools from MCP server %r: %s", server.name, e)
         return []
 
