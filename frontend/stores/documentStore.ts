@@ -122,6 +122,24 @@ export const useDocumentStore = defineStore('document', () => {
     return false
   }
 
+  const fetchChunk = async (
+    documentId: number,
+    chunkIndex: number,
+  ): Promise<{ filename: string, page: number | null, content: string } | { error: string }> => {
+    try {
+      const response = await api.value.get('documents/chunk/', {
+        params: { document_id: documentId, chunk_index: chunkIndex },
+      })
+
+      return response.data
+    }
+    catch (error: any) {
+      console.error(error)
+
+      return { error: error.response?.data?.error || 'Could not load that passage.' }
+    }
+  }
+
   const deleteDocument = async (collectionId: number, documentId: number): Promise<boolean> => {
     try {
       const response = await api.value.delete('documents/', { data: { id: documentId } })
@@ -154,5 +172,6 @@ export const useDocumentStore = defineStore('document', () => {
     fetchDocuments,
     uploadDocument,
     deleteDocument,
+    fetchChunk,
   }
 })

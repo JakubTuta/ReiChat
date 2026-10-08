@@ -11,6 +11,30 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:activeCollections', collections: { id: number, name: string }[]): void
 }>()
+const containerStore = useContainerStore()
+const { containers, pullProgress } = storeToRefs(containerStore)
+
+// The catalog lists every embedding model ollama.com has; only the ones
+// with a container can actually turn files into something searchable.
+const RECOMMENDED_EMBEDDER = { model: 'nomic-embed-text', parameters: 'latest' }
+
+function isInstalled(model: string, parameters: string): boolean {
+  return containers.value.some(c => c.environment?.model === model && c.environment?.parameters === parameters)
+}
+
+const installedEmbeddingModels = computed(() => props.embeddingModels
+  .map(m => ({ ...m, versions: m.versions.filter(v => isInstalled(m.model, v.parameters)) }))
+  .filter(m => m.versions.length))
+
+const recommendedAvailable = computed(() => props.embeddingModels.some(m => m.model === RECOMMENDED_EMBEDDER.model
+  && m.versions.some(v => v.parameters === RECOMMENDED_EMBEDDER.parameters)))
+
+const recommendedProgress = computed(() => pullProgress.value[`${RECOMMENDED_EMBEDDER.model}_${RECOMMENDED_EMBEDDER.parameters}`] ?? null)
+
+async function installRecommendedEmbedder() {
+  await containerStore.runContainer(RECOMMENDED_EMBEDDER)
+  containerStore.connectSocket()
+}
 
 const isOpen = defineModel<boolean>({ default: false, required: true })
 
@@ -36,13 +60,18 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null
 const POLL_INTERVAL_MS = 2000
 
 const availableVersions = computed(() => {
-  const model = props.embeddingModels.find(m => m.id === newEmbeddingModelId.value)
+  const model = installedEmbeddingModels.value.find(m => m.id === newEmbeddingModelId.value)
 
   return model?.versions ?? []
 })
 
 watch(newEmbeddingModelId, () => {
   newEmbeddingParameters.value = availableVersions.value[0]?.parameters ?? null
+})
+
+watch(installedEmbeddingModels, (models) => {
+  if (creating.value && !newEmbeddingModelId.value && models.length)
+    newEmbeddingModelId.value = models[0].id
 })
 
 function isActive(collection: IDocumentCollection) {
@@ -98,6 +127,8 @@ async function toggleExpand(collection: IDocumentCollection) {
 watch(isOpen, (open) => {
   if (open) {
     documentStore.fetchCollections(props.chatId)
+    if (!containers.value.length)
+      containerStore.getUserContainers()
   }
   else {
     stopPolling()
@@ -111,7 +142,7 @@ onUnmounted(stopPolling)
 function openCreateForm() {
   creating.value = true
   newName.value = ''
-  newEmbeddingModelId.value = props.embeddingModels[0]?.id ?? null
+  newEmbeddingModelId.value = installedEmbeddingModels.value[0]?.id ?? null
   newEmbeddingParameters.value = availableVersions.value[0]?.parameters ?? null
   newIsGlobal.value = true
 }
@@ -304,7 +335,9 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
 
               <span class="document-filename font-mono">{{ document.filename }}</span>
 
-              <span class="document-status font-mono">{{ STATUS_META[document.status].text }}</span>
+              <span class="document-status font-mono">
+                {{ STATUS_META[document.status].text }}<template v-if="document.status === 'processing' && document.progress"> {{ document.progress }}%</template>
+              </span>
 
               <button
                 type="button"
@@ -346,15 +379,35 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
 
         <template v-if="creating">
           <div
-            v-if="!embeddingModels.length"
+            v-if="!installedEmbeddingModels.length"
             class="embedding-warning"
           >
-            No embedding model installed yet. Install one (e.g. <strong>nomic-embed-text</strong>
-            ) on
-            the <NuxtLink to="/models">
-              Models page
-            </NuxtLink> first — a file set needs one to turn your files into something the chat can
-            search.
+            <p class="embedding-warning-text">
+              To search your files, the app needs a small helper model (an "embedding model") that turns
+              text into something it can look up. None is installed yet.
+            </p>
+
+            <template v-if="recommendedProgress">
+              Installing {{ RECOMMENDED_EMBEDDER.model }}… {{ recommendedProgress.percent }}%
+            </template>
+
+            <v-btn
+              v-else-if="recommendedAvailable"
+              size="small"
+              color="mint-btn"
+              variant="flat"
+              @click="installRecommendedEmbedder"
+            >
+              Install {{ RECOMMENDED_EMBEDDER.model }} (about 270 MB)
+            </v-btn>
+
+            <template v-else>
+              Install one (e.g. <strong>nomic-embed-text</strong>
+              ) on the
+              <NuxtLink to="/models">
+                Models page
+              </NuxtLink>.
+            </template>
           </div>
 
           <v-text-field
@@ -362,14 +415,14 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
             label="File set name"
             density="compact"
             autofocus
-            :disabled="!embeddingModels.length"
+            :disabled="!installedEmbeddingModels.length"
             class="mb-2 mt-3"
           />
 
           <v-select
             v-model="newEmbeddingModelId"
             label="Embedding model"
-            :items="embeddingModels"
+            :items="installedEmbeddingModels"
             item-title="name"
             item-value="id"
             density="compact"
@@ -591,6 +644,11 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
   border: 1px solid var(--color-banner-border);
   color: var(--color-banner-text);
   font-size: 12px;
+}
+
+.embedding-warning-text {
+  margin: 0 0 8px;
+  line-height: 1.5;
 }
 
 .scope-toggle-row {

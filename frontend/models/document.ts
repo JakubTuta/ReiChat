@@ -18,5 +18,7 @@ export interface IDocument {
   status: IDocumentStatus
   error_message: string
   chunk_count: number
+  // Percent embedded so far, while processing.
+  progress: number
   uploaded_at: string
 }

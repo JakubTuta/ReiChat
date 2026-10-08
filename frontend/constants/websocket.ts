@@ -35,6 +35,8 @@ export interface Citation {
   document_id: number
   filename: string
   chunk_index: number
+  // PDFs only.
+  page: number | null
 }
 
 // An MCP tool call waiting for the user's Allow/Deny — see

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Citation } from '~/constants/websocket'
 import type { IContainer } from '~/models/container'
 import type { IChatMessage } from '~/stores/chatStore'
 
@@ -54,6 +55,29 @@ function switchToNextBranch() {
 }
 
 const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
+
+// One chip per file+page, not per chunk — several neighbouring chunks from
+// the same page would otherwise read as duplicate sources.
+const sources = computed(() => {
+  const seen = new Set<string>()
+
+  return (props.message.citations ?? []).filter((citation) => {
+    const key = `${citation.document_id}:${citation.page ?? ''}`
+    if (seen.has(key))
+      return false
+    seen.add(key)
+
+    return true
+  })
+})
+
+const citationDialogOpen = ref(false)
+const openCitation = ref<Citation | null>(null)
+
+function showCitation(citation: Citation) {
+  openCitation.value = citation
+  citationDialogOpen.value = true
+}
 </script>
 
 <template>
@@ -104,11 +128,26 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
 
     <div class="assistant-footer font-mono">
       <span
-        v-if="message.citations?.length"
+        v-if="sources.length"
         class="footer-citations"
       >
-        Sources: {{ [...new Set(message.citations.map(c => c.filename))].join(', ') }}
+        Sources:
+        <button
+          v-for="citation in sources"
+          :key="`${citation.document_id}-${citation.chunk_index}`"
+          type="button"
+          class="citation-chip"
+          title="See the passage the model used"
+          @click="showCitation(citation)"
+        >
+          {{ citation.filename }}<template v-if="citation.page"> p.{{ citation.page }}</template>
+        </button>
       </span>
+
+      <CitationDialog
+        v-model="citationDialogOpen"
+        :citation="openCitation"
+      />
 
       <span
         v-if="message.stats"
@@ -323,6 +362,18 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
 
 .footer-citations {
   color: var(--color-mint-deep);
+}
+
+.citation-chip {
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--color-mint-border);
+  background: var(--color-mint-tint);
+  color: var(--color-mint-ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
 }
 
 .footer-spacer {
