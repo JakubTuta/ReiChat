@@ -23,6 +23,23 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   const isReconnecting = ref(false)
   const reconnectFailed = ref(false)
   const pendingReplaceBackup = ref<{ index: number, messages: IChatMessage[] } | null>(null)
+  // Text of a prompt the server rejected or couldn't answer — handed back
+  // to the composer so the user doesn't have to retype it.
+  const failedPrompt = ref('')
+  let lastPromptText = ''
+  let hasConnectedBefore = false
+
+  // The local list is optimistic (a sent message shows before the server
+  // stores anything), but edit/regenerate/branch-switch address messages by
+  // their position in it. After a failed request — never persisted
+  // server-side — or a dropped connection — which can persist a partial
+  // reply the client never saw — positions would point at different
+  // messages than the server's, so edits could land on the wrong one.
+  // Reloading from the server makes its copy the truth again.
+  async function resyncHistory() {
+    if (activeModel.value && activeChatId.value)
+      await chatStore.fetchChatHistory(activeModel.value, activeChatId.value)
+  }
 
   function restorePendingReplace() {
     if (!pendingReplaceBackup.value || !activeModel.value)
@@ -49,6 +66,12 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     onConnect: () => {
       isReconnecting.value = false
       reconnectFailed.value = false
+
+      if (hasConnectedBefore) {
+        resetStreamState()
+        resyncHistory()
+      }
+      hasConnectedBefore = true
     },
 
     onDisconnect: () => {
@@ -66,9 +89,19 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     },
 
     onError: (errorMessage: string) => {
+      const hadPendingPrompt = !!lastPromptText
       waitingForResponse.value = false
       restorePendingReplace()
+      botResponse.value = ''
+      toolCallTrace.value = []
+      notices.value = []
       snackbarStore.showSnackbarError(errorMessage)
+
+      if (hadPendingPrompt) {
+        failedPrompt.value = lastPromptText
+        lastPromptText = ''
+      }
+      resyncHistory()
     },
 
     onNotice: (notice: string) => {
@@ -89,6 +122,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     },
 
     onReceiveMessage: (message: WebsocketResponse) => {
+      if (message.done)
+        lastPromptText = ''
+
       if (message.tool_call) {
         waitingForResponse.value = false
         toolCallTrace.value = [...toolCallTrace.value, message.tool_call]
@@ -154,6 +190,8 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
 
     activeChatId.value = chatId
     activeModel.value = model
+    hasConnectedBefore = false
+    lastPromptText = ''
     resetStreamState()
     isReconnecting.value = false
     reconnectFailed.value = false
@@ -178,6 +216,8 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
 
     waitingForResponse.value = true
     activeModel.value = message.ai_model
+    lastPromptText = message.message
+    failedPrompt.value = ''
     websocket.value.sendMessage(message)
 
     return true
@@ -259,6 +299,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     isReconnecting,
     reconnectFailed,
     pendingReplaceBackup,
+    failedPrompt,
     connectToChat,
     reconnectManually,
     sendMessage,

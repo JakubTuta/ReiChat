@@ -11,7 +11,8 @@ vi.stubGlobal('ref', ref)
 vi.stubGlobal('storeToRefs', storeToRefs)
 
 const chatHistoryPerModel = ref<Record<string, any[]>>({})
-vi.stubGlobal('useChatStore', () => ({ chatHistoryPerModel }))
+const fetchChatHistory = vi.fn(async () => {})
+vi.stubGlobal('useChatStore', () => ({ chatHistoryPerModel, fetchChatHistory }))
 
 const showSnackbarError = vi.fn()
 vi.stubGlobal('useSnackbarStore', () => ({ showSnackbarError }))
@@ -67,6 +68,7 @@ beforeEach(() => {
   instances = []
   chatHistoryPerModel.value = {}
   showSnackbarError.mockClear()
+  fetchChatHistory.mockClear()
   setActivePinia(createPinia())
 })
 
@@ -142,5 +144,42 @@ describe('chatSocketStore', () => {
 
     expect(sent).toBe(false)
     expect(chatHistoryPerModel.value.llama3_1).toBeUndefined()
+  })
+
+  it('a failed prompt reloads history from the server and hands the text back', () => {
+    const store = useChatSocketStore()
+
+    store.connectToChat('room1', 'llama3.1', 'http://localhost:8000/')
+    instances[0].open()
+    store.sendMessage({ message: 'hi', ai_model: 'llama3.1', ai_model_parameters: '8b' })
+
+    instances[0].receive({ error: 'Model container is not running.', done: true })
+
+    // The optimistic user message was never stored server-side — the list
+    // has to come back from the server, not keep the phantom message.
+    expect(fetchChatHistory).toHaveBeenCalledWith('llama3.1', 'room1')
+    expect(store.failedPrompt).toBe('hi')
+    expect(store.waitingForResponse).toBe(false)
+  })
+
+  it('a reconnect drops the half-streamed reply and reloads history', () => {
+    vi.useFakeTimers()
+    const store = useChatSocketStore()
+
+    store.connectToChat('room1', 'llama3.1', 'http://localhost:8000/')
+    instances[0].open()
+    expect(fetchChatHistory).not.toHaveBeenCalled()
+
+    store.sendMessage({ message: 'hi', ai_model: 'llama3.1', ai_model_parameters: '8b' })
+    instances[0].receive({ message: 'partial', done: false })
+    instances[0].readyState = FakeWebSocket.CLOSED
+    instances[0].dispatch('close')
+    vi.advanceTimersByTime(1000)
+    vi.useRealTimers()
+
+    instances[1].open()
+
+    expect(store.botResponse).toBe('')
+    expect(fetchChatHistory).toHaveBeenCalledWith('llama3.1', 'room1')
   })
 })

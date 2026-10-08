@@ -45,6 +45,7 @@ const {
   waitingForResponse,
   isReconnecting,
   reconnectFailed,
+  failedPrompt,
 } = storeToRefs(chatSocketStore)
 
 const snackbarStore = useSnackbarStore()
@@ -229,6 +230,13 @@ watch([selectedChatId, selectedModel], ([newChatId, newModel]) => {
 
   chatSocketStore.connectToChat(newChatId, newModel.model, wsBaseURL)
 }, { immediate: true })
+
+// A prompt the server couldn't answer is gone from the message list (it was
+// never stored) — put it back in the composer rather than losing it.
+watch(failedPrompt, (text) => {
+  if (text && !composerMessage.value.trim())
+    composerMessage.value = text
+})
 
 function reconnectManually() {
   chatSocketStore.reconnectManually(wsBaseURL)
