@@ -28,8 +28,11 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
+from container.ContainerManager import ContainerManager
+
 from .. import functions
 from ..functions import ModelUnavailableError
+from ..rag import embeddings
 from .parsing import OpenAICompatError, ParsedRequest, parse_chat_completion_request
 
 logger = logging.getLogger(__name__)
@@ -139,6 +142,83 @@ async def _build_full_response(
             },
         }
     )
+
+
+class ModelsView(View):
+    """`GET /v1/models` — most OpenAI clients list models before anything
+    else and refuse to continue without it. Lists every installed model as
+    "name:tag", the id /v1/chat/completions and /v1/embeddings accept."""
+
+    def get(self, request: HttpRequest) -> HttpResponse:
+        manager = ContainerManager()
+        containers = manager.get_available_containers() if manager.is_connected() else []
+
+        data = [
+            {
+                "id": f"{c['environment']['model']}:{c['environment']['parameters']}",
+                "object": "model",
+                "created": 0,
+                "owned_by": "reichat",
+            }
+            for c in containers
+            if c["environment"].get("model") and c["environment"].get("parameters")
+        ]
+        return JsonResponse({"object": "list", "data": data})
+
+
+MAX_EMBEDDING_INPUTS = 256
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EmbeddingsView(View):
+    """`POST /v1/embeddings` against an installed embedding model, e.g.
+    nomic-embed-text:latest — for tools that do their own RAG."""
+
+    def post(self, request: HttpRequest) -> HttpResponse:
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Request body must be valid JSON.")
+
+        if not isinstance(body, dict):
+            return _error_response(400, "Request body must be a JSON object.")
+
+        model_field = body.get("model")
+        if not isinstance(model_field, str) or not model_field.strip():
+            return _error_response(400, "model is required.", param="model")
+
+        raw_input = body.get("input")
+        inputs = [raw_input] if isinstance(raw_input, str) else raw_input
+        if (
+            not isinstance(inputs, list)
+            or not inputs
+            or not all(isinstance(i, str) for i in inputs)
+        ):
+            return _error_response(400, "input must be a string or a non-empty array of strings.", param="input")
+        if len(inputs) > MAX_EMBEDDING_INPUTS:
+            return _error_response(400, f"At most {MAX_EMBEDDING_INPUTS} inputs per request.", param="input")
+
+        model_name, _, parameters = model_field.partition(":")
+        try:
+            client = embeddings.get_embeddings_client(model_name, parameters or "latest")
+            vectors = client.embed_documents(inputs)
+        except ModelUnavailableError as e:
+            return _error_response(503, str(e))
+        except Exception:
+            logger.exception("Unexpected error while computing embeddings")
+            return _error_response(500, "An unexpected error occurred.")
+
+        return JsonResponse(
+            {
+                "object": "list",
+                "data": [
+                    {"object": "embedding", "index": i, "embedding": vector} for i, vector in enumerate(vectors)
+                ],
+                "model": model_field,
+                # Ollama's embed API doesn't report token counts.
+                "usage": {"prompt_tokens": 0, "total_tokens": 0},
+            }
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

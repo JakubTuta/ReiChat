@@ -153,3 +153,66 @@ async def test_model_unavailable_returns_503_before_streaming_starts(ai_model, a
 
     assert response.status_code == 503
     assert response.json()["error"]["type"] == "server_error"
+
+
+async def test_models_lists_installed_models_as_name_tag(async_client, monkeypatch):
+    from container.ContainerManager import ContainerManager
+
+    monkeypatch.setattr(ContainerManager, "is_connected", lambda self: True)
+    monkeypatch.setattr(
+        ContainerManager, "get_available_containers",
+        lambda self: [{"name": "llama3.1_8b", "status": "running", "port": "1", "environment": {"model": "llama3.1", "parameters": "8b"}}],
+    )
+
+    response = await async_client.get("/v1/models")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "object": "list",
+        "data": [{"id": "llama3.1:8b", "object": "model", "created": 0, "owned_by": "reichat"}],
+    }
+
+
+async def test_embeddings_returns_one_vector_per_input(async_client, monkeypatch):
+    from django_app.openai_compat import views
+
+    class _FakeClient:
+        def embed_documents(self, texts):
+            return [[float(len(t)), 0.0] for t in texts]
+
+    monkeypatch.setattr(views.embeddings, "get_embeddings_client", lambda model, params: _FakeClient())
+
+    response = await async_client.post(
+        "/v1/embeddings", data=json.dumps({"model": "nomic-embed-text", "input": ["ab", "abcd"]}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [d["embedding"] for d in body["data"]] == [[2.0, 0.0], [4.0, 0.0]]
+    assert [d["index"] for d in body["data"]] == [0, 1]
+
+
+async def test_embeddings_reports_a_stopped_model_as_503(async_client, monkeypatch):
+    from django_app.openai_compat import views
+
+    def _down(model, params):
+        raise ModelUnavailableError("Embedding model nomic-embed-text:latest isn't running.")
+
+    monkeypatch.setattr(views.embeddings, "get_embeddings_client", _down)
+
+    response = await async_client.post(
+        "/v1/embeddings", data=json.dumps({"model": "nomic-embed-text", "input": "hi"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 503
+    assert "isn't running" in response.json()["error"]["message"]
+
+
+async def test_embeddings_rejects_bad_input(async_client):
+    response = await async_client.post(
+        "/v1/embeddings", data=json.dumps({"model": "x", "input": [1, 2]}), content_type="application/json",
+    )
+
+    assert response.status_code == 400

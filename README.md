@@ -78,6 +78,22 @@ almost anything and are a good way to try things out.
 
 ---
 
+## Use your models from other apps
+
+ReiChat speaks the OpenAI API, so editor plugins, scripts and other tools that let you set an
+"OpenAI base URL" can use your installed models. Point them at:
+
+```
+http://localhost:8000/v1
+```
+
+Any API key works (none is checked). Model names are `name:size`, e.g. `llama3.2:3b` —
+`GET /v1/models` lists the ones you have installed. Chat (`/v1/chat/completions`, streaming or
+not) and embeddings (`/v1/embeddings`, with an embedding model such as `nomic-embed-text:latest`)
+are supported; tool calling through this endpoint is not.
+
+---
+
 ## GPU support (optional, makes models noticeably faster)
 
 - **Windows** — [NVIDIA GPUs with WSL2](https://docs.docker.com/desktop/features/gpu/)
