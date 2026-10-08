@@ -448,7 +448,7 @@ function createContainerCommand(model: IAIModel): string[] {
   const createCommand = `docker run -d ${escapeCharacter.value}
   --name ${containerName} ${escapeCharacter.value}
   --network chatbot-network ${escapeCharacter.value}
-${gpuFlag}  -p ${containerPort}:11434 ${escapeCharacter.value}
+${gpuFlag}  -p 127.0.0.1:${containerPort}:11434 ${escapeCharacter.value}
   -v reichat-ollama-${containerName}:/root/.ollama ${escapeCharacter.value}
   --label reichat.managed=true ${escapeCharacter.value}
   --label reichat.model=${model.model} ${escapeCharacter.value}

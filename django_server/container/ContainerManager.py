@@ -287,7 +287,10 @@ class ContainerManager:
                 name=container_name,
                 image=f"{OLLAMA_IMAGE}:latest",
                 detach=True,
-                ports={"11434/tcp": port},
+                # Loopback only, like every port docker-compose.yaml
+                # publishes — a bare port binds 0.0.0.0, putting an
+                # unauthenticated Ollama API on the user's whole network.
+                ports={"11434/tcp": ("127.0.0.1", port)},
                 network="chatbot-network",
                 device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])] if use_gpu else [],
                 hostname=container_name,

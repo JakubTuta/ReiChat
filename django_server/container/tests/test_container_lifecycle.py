@@ -67,6 +67,7 @@ def test_create_labels_container_and_mounts_a_named_volume_for_weights(connected
     assert kwargs["labels"]["reichat.port"] == "11500"
     assert kwargs["volumes"] == {"reichat-ollama-llama3.1_8b": {"bind": "/root/.ollama", "mode": "rw"}}
     assert kwargs["device_requests"]
+    assert kwargs["ports"] == {"11434/tcp": ("127.0.0.1", 11500)}
     assert ContainerManager._gpu_supported is True
 
 
