@@ -528,7 +528,7 @@ class AllChats(APIView):
             .only(
                 "id", "title", "persona__id", "persona__name",
                 "temperature", "num_ctx", "top_p", "seed", "tools_enabled",
-                "memory_mode", "seed_summary", "seed_source__id", "seed_source__title",
+                "memory_mode", "seed_summary", "seed_source__id", "seed_source__title", "think_level",
             )
             .select_related("persona", "seed_source")
             .prefetch_related("active_collections")
@@ -548,6 +548,7 @@ class AllChats(APIView):
                 ],
                 "tools_enabled": chat.tools_enabled,
                 "memory_mode": chat.memory_mode,
+                "think_level": chat.think_level,
                 "continued_from": (
                     {"id": chat.seed_source.id, "title": chat.seed_source.title} if chat.seed_source else None
                 ),
@@ -631,7 +632,8 @@ class AllChats(APIView):
     }
 
     _UPDATABLE_CHAT_FIELDS = {
-        "title", "persona_id", "collection_ids", "tools_enabled", "memory_mode", *_GENERATION_PARAM_BOUNDS,
+        "title", "persona_id", "collection_ids", "tools_enabled", "memory_mode", "think_level",
+        *_GENERATION_PARAM_BOUNDS,
     }
 
     @decorators.required_body_params(["id"])
@@ -710,6 +712,20 @@ class AllChats(APIView):
             chat_history.tools_enabled = tools_enabled
             update_fields.append("tools_enabled")
 
+        if "think_level" in request_data:
+            think_level = request_data["think_level"]
+
+            # Free-form past "off"/"on" on purpose: level names come from the
+            # model itself (/api/show), and resolve_reasoning ignores one the
+            # model doesn't list.
+            if not isinstance(think_level, str) or len(think_level) > 32:
+                return Response(
+                    {"error": "think_level must be a short string"}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+            chat_history.think_level = think_level
+            update_fields.append("think_level")
+
         if "memory_mode" in request_data:
             memory_mode = request_data["memory_mode"]
             valid_modes = {choice for choice, _ in models.ChatHistory.MEMORY_MODE_CHOICES}
@@ -786,6 +802,7 @@ class ContinueChat(APIView):
             seed=source.seed,
             tools_enabled=source.tools_enabled,
             memory_mode=source.memory_mode,
+            think_level=source.think_level,
             seed_source=source,
         )
         continued.active_collections.set(source.active_collections.all())
@@ -806,7 +823,8 @@ class ChatContext(APIView):
             return Response({"error": "Chat not found"}, status=status.HTTP_404_NOT_FOUND)
 
         parameters = request.query_params.get("parameters", "")
-        model_max = functions.get_model_context_length(model, parameters) if parameters else None
+        model_info = functions.get_model_info(model, parameters) if parameters else None
+        model_max = model_info["context_length"] if model_info else None
         num_ctx = context_window.resolve_num_ctx(chat_history.num_ctx, model_max)
 
         history = functions.deserialize_messages(functions.get_messages_for_chat(chat_history))
@@ -836,6 +854,7 @@ class ChatContext(APIView):
                 "summarized": summarized,
                 "presets": context_window.MEMORY_PRESETS,
                 "tokens_per_page": context_window.TOKENS_PER_PAGE,
+                "thinking": model_info["thinking"] if model_info else None,
             },
             status=status.HTTP_200_OK,
         )

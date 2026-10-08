@@ -57,3 +57,18 @@ def test_running_models_normalizes_ps_output(monkeypatch):
     assert ollama_api.running_models("http://o") == [
         {"name": "qwen2.5:0.5b", "size": 1000, "size_vram": 600, "context_length": 8192}
     ]
+
+
+def test_thinking_controls_reads_levels_and_default():
+    info = {"capabilities": ["completion", "thinking"], "thinking": {"values": ["low", "medium", "high"], "default": "medium"}}
+
+    assert ollama_api.thinking_controls(info) == {"values": ["low", "medium", "high"], "default": "medium"}
+
+
+def test_thinking_controls_none_for_models_that_cannot_think():
+    assert ollama_api.thinking_controls({"capabilities": ["completion"]}) is None
+    assert ollama_api.thinking_controls({"capabilities": ["thinking"], "thinking": {"values": [False]}}) is None
+
+
+def test_thinking_controls_assume_on_off_when_metadata_is_missing():
+    assert ollama_api.thinking_controls({"capabilities": ["thinking"]}) == {"values": [False, True], "default": True}

@@ -60,7 +60,7 @@ async def _close_leaked_db_connection():
 def _no_model_context_lookup(monkeypatch):
     # The real lookup asks the model's Ollama container for its maximum
     # context; there's no container here. Tests that care override this.
-    monkeypatch.setattr(functions, "get_model_context_length", lambda model_name, parameters: None)
+    monkeypatch.setattr(functions, "get_model_info", lambda model_name, parameters: None)
     monkeypatch.setattr(functions, "get_gpu_share", lambda model_name, parameters: None)
 
 
@@ -91,7 +91,7 @@ def tools_chat():
 
 
 async def test_receive_streams_response_and_persists_history(chat, monkeypatch):
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         for chunk in ("Hel", "lo"):
             yield chunk
 
@@ -128,7 +128,7 @@ async def test_receive_passes_chat_persona_system_prompt_to_astream(chat, monkey
 
     received_system_prompt = None
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         nonlocal received_system_prompt
         received_system_prompt = system_prompt
         yield "Arr"
@@ -160,7 +160,7 @@ async def test_receive_passes_chat_generation_params_to_astream(chat, monkeypatc
 
     received_params = None
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         nonlocal received_params
         received_params = generation_params
         yield "ok"
@@ -199,7 +199,7 @@ async def _send_and_collect(chat, message: str = "Hi") -> list[dict]:
 
 
 def _capturing_astream(captured: dict, stats_values: dict | None = None):
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         captured.update(history=history, system_prompt=system_prompt, generation_params=generation_params)
         yield "Hi"
         if stats is not None and stats_values:
@@ -242,7 +242,9 @@ async def test_without_a_chosen_length_the_standard_preset_is_requested_explicit
 async def test_memory_never_exceeds_what_the_model_supports(chat, monkeypatch):
     chat.num_ctx = 32768
     await database_sync_to_async(chat.save)(update_fields=["num_ctx"])
-    monkeypatch.setattr(functions, "get_model_context_length", lambda model_name, parameters: 2048)
+    monkeypatch.setattr(
+        functions, "get_model_info", lambda model_name, parameters: {"context_length": 2048, "thinking": None}
+    )
     captured: dict = {}
     monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream(captured))
 
@@ -361,7 +363,7 @@ async def test_continued_chat_summarizes_its_source_on_the_first_message(chat, m
 
 
 async def test_receive_omits_stats_key_entirely_when_nothing_was_reported(chat, monkeypatch):
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "Hi"
 
     monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
@@ -495,7 +497,7 @@ async def test_receive_unknown_model_reports_invalid_instead_of_500(chat):
 async def test_stop_cancels_in_flight_generation_and_persists_partial_response(chat, monkeypatch):
     hang = asyncio.Event()
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "Hel"
         await hang.wait()
         yield "lo"  # pragma: no cover - never reached, cancelled first
@@ -537,7 +539,7 @@ async def test_stop_with_no_active_generation_is_a_noop(chat):
 async def test_prompt_while_generating_is_rejected_instead_of_queued(chat, monkeypatch):
     hang = asyncio.Event()
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "Hel"
         await hang.wait()
 
@@ -576,7 +578,7 @@ async def test_receive_unknown_message_type_reports_error(chat):
 
 
 async def _send_first_turn(communicator, monkeypatch, reply="Hello"):
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield reply
 
     monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
@@ -603,7 +605,7 @@ async def test_regenerate_replaces_last_assistant_message_and_keeps_user_message
 
     await _send_first_turn(communicator, monkeypatch, reply="Hello")
 
-    async def _fake_regenerate(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_regenerate(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         # The regenerated turn's history must exclude the answer being
         # replaced, or the model would see its own stale reply as context.
         assert history == []
@@ -677,7 +679,7 @@ async def test_regenerate_failure_leaves_original_assistant_message_intact(chat,
 async def test_regenerate_while_generating_is_rejected(chat, monkeypatch):
     hang = asyncio.Event()
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "Hel"
         await hang.wait()
 
@@ -708,7 +710,7 @@ async def test_edit_resend_replaces_edited_message_and_discards_everything_after
 
     await _send_first_turn(communicator, monkeypatch, reply="Hello")
 
-    async def _fake_second_turn(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_second_turn(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "I'm good"
 
     monkeypatch.setattr(functions, "astream_bot_response", _fake_second_turn)
@@ -718,7 +720,7 @@ async def test_edit_resend_replaces_edited_message_and_discards_everything_after
     assert await communicator.receive_json_from() == {"message": "I'm good", "done": False}
     assert _without_context(await communicator.receive_json_from()) == {"message": "I'm good", "done": True}
 
-    async def _fake_edit(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_edit(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         # History must stop before the edited message — the model shouldn't
         # see the stale exchange this edit is replacing, or the turn it
         # invalidated.
@@ -834,7 +836,7 @@ async def test_edit_resend_failure_leaves_original_tail_intact(chat, monkeypatch
 async def test_edit_resend_while_generating_is_rejected(chat, monkeypatch):
     hang = asyncio.Event()
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "Hel"
         await hang.wait()
 
@@ -881,7 +883,7 @@ async def test_edit_resend_missing_required_keys_reports_error(chat):
 
 
 async def test_receive_uses_tool_path_when_chat_and_model_both_allow_it(tools_chat, monkeypatch):
-    async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None):
+    async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None, reasoning=None):
         yield {"name": "calculator", "args": {"expression": "2+2"}, "result": "4"}
         yield "The answer is 4."
 
@@ -920,7 +922,7 @@ async def test_receive_ignores_tools_enabled_when_model_lacks_tools_capability(c
     chat.tools_enabled = True
     await database_sync_to_async(chat.save)(update_fields=["tools_enabled"])
 
-    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None):
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
         yield "plain reply"
 
     async def _fail_if_called(*args, **kwargs):
@@ -976,3 +978,36 @@ async def test_done_frame_reports_how_much_of_the_model_fits_on_the_gpu(chat, mo
     done = (await _send_and_collect(chat))[-1]
 
     assert done["context"]["gpu_share"] == 0.6
+
+
+async def test_thinking_is_streamed_separately_and_saved_with_the_reply(chat, monkeypatch):
+    chat.think_level = "on"
+    await database_sync_to_async(chat.save)(update_fields=["think_level"])
+    monkeypatch.setattr(
+        functions, "get_model_info",
+        lambda model_name, parameters: {"context_length": 8192, "thinking": {"values": [False, True], "default": True}},
+    )
+    received: dict = {}
+
+    async def _fake_astream(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, reasoning=None):
+        received["reasoning"] = reasoning
+        yield functions.ThinkingDelta("Hmm, ")
+        yield functions.ThinkingDelta("easy.")
+        yield "4"
+
+    monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
+
+    frames = await _send_and_collect(chat)
+
+    assert frames[0] == {"thinking": "Hmm, ", "done": False}
+    assert frames[1] == {"thinking": "easy.", "done": False}
+    assert frames[2] == {"message": "4", "done": False}
+    assert frames[-1]["message"] == "4"
+    assert received["reasoning"] is True
+
+    reply = await database_sync_to_async(
+        lambda: models.ChatMessage.objects.filter(chat=chat, role="assistant").get()
+    )()
+    assert reply.content == "4"
+    assert reply.thinking == "Hmm, easy."
+

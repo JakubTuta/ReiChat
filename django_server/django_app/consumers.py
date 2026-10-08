@@ -281,6 +281,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         edit_resend_parent: models.ChatMessage | None = None,
     ) -> None:
         full_response = ""
+        full_thinking = ""
         stats: functions.GenerationStats = {}
         citations: list[rag_retrieval.Citation] = []
         context_report: context_window.ContextReport | None = None
@@ -317,15 +318,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # "was a parent found".
             if regenerate_from_user_message is not None:
                 await database_sync_to_async(functions.commit_new_assistant_branch)(
-                    chat_history, regenerate_from_user_message, content
+                    chat_history, regenerate_from_user_message, content, full_thinking
                 )
             elif is_edit_resend:
                 await database_sync_to_async(functions.commit_new_exchange_branch)(
-                    chat_history, edit_resend_parent, user_prompt, content, image
+                    chat_history, edit_resend_parent, user_prompt, content, image, full_thinking
                 )
             else:
                 await database_sync_to_async(functions.add_messages_to_history)(
-                    chat_history, user_prompt, content, image
+                    chat_history, user_prompt, content, image, full_thinking
                 )
 
         # Structured output and tool calling are separate response shapes —
@@ -356,7 +357,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # it's being written without some of their documents.
             for warning in rag_warnings:
                 await self._send_notice(warning)
+            model_info = await sync_to_async(functions.get_model_info, thread_sensitive=False)(
+                ai_model.model, ai_model_parameters
+            )
+            reasoning = functions.resolve_reasoning(chat_history.think_level, model_info)
             system_prompt, history_messages, context_report = await self._fit_to_memory(
+                model_info,
                 ai_model,
                 ai_model_parameters,
                 chat_history,
@@ -406,8 +412,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     generation_params,
                     stats,
                     mcp_servers,
+                    reasoning,
                 ):
-                    if isinstance(chunk, dict):
+                    if isinstance(chunk, functions.ThinkingDelta):
+                        full_thinking += chunk.text
+                        await self.send(text_data=json.dumps({"thinking": chunk.text, "done": False}))
+                    elif isinstance(chunk, dict):
                         await self.send(
                             text_data=json.dumps({"tool_call": chunk, "done": False})
                         )
@@ -427,7 +437,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     system_prompt,
                     generation_params,
                     stats,
+                    reasoning,
                 ):
+                    if isinstance(chunk, functions.ThinkingDelta):
+                        full_thinking += chunk.text
+                        await self.send(text_data=json.dumps({"thinking": chunk.text, "done": False}))
+                        continue
                     full_response += chunk
                     await self.send(
                         text_data=json.dumps({"message": chunk, "done": False})
@@ -484,6 +499,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def _fit_to_memory(
         self,
+        model_info: functions.ModelInfo | None,
         ai_model: models.AIModel,
         parameters: str,
         chat_history: models.ChatHistory,
@@ -502,9 +518,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         Summaries go between the persona and the retrieved documents, so the
         persona leads and the documents sit closest to the question.
         """
-        model_max = await sync_to_async(functions.get_model_context_length, thread_sensitive=False)(
-            ai_model.model, parameters
-        )
+        model_max = model_info["context_length"] if model_info else None
         num_ctx = context_window.resolve_num_ctx(chat_history.num_ctx, model_max)
         generation_params["num_ctx"] = num_ctx
         summarize_mode = chat_history.memory_mode == models.ChatHistory.MEMORY_MODE_SUMMARIZE

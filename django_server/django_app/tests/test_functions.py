@@ -403,3 +403,82 @@ def test_gpu_share_reads_the_loaded_model_from_ps(monkeypatch):
     )
 
     assert functions.get_gpu_share("llama3.1", "8b") == 0.75
+
+
+def _info(values, default):
+    return {"context_length": 8192, "thinking": {"values": values, "default": default}}
+
+
+def test_resolve_reasoning_is_none_only_for_models_that_cannot_think():
+    assert functions.resolve_reasoning("", None) is None
+    assert functions.resolve_reasoning("on", {"context_length": 8192, "thinking": None}) is None
+
+
+def test_resolve_reasoning_never_leaves_a_thinking_model_on_none():
+    # None would let Ollama think while langchain-ollama drops the text.
+    assert functions.resolve_reasoning("", _info([False, True], True)) is True
+    assert functions.resolve_reasoning("", _info(["low", "medium", "high"], "medium")) == "medium"
+
+
+def test_resolve_reasoning_maps_user_choices():
+    on_off = _info([False, True], True)
+    levels = _info(["low", "medium", "high"], "medium")
+
+    assert functions.resolve_reasoning("off", on_off) is False
+    assert functions.resolve_reasoning("on", on_off) is True
+    assert functions.resolve_reasoning("high", levels) == "high"
+    # Can't switch gpt-oss-style models off — falls back to their default.
+    assert functions.resolve_reasoning("off", levels) == "medium"
+    assert functions.resolve_reasoning("bogus", levels) == "medium"
+
+
+async def test_astream_bot_response_yields_thinking_separately(tool_test_model, monkeypatch):
+    monkeypatch.setattr(
+        functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
+    )
+    built_with: dict = {}
+
+    class _ThinkingLLM:
+        async def astream(self, messages):
+            yield AIMessageChunk(content="", additional_kwargs={"reasoning_content": "Let me add. "})
+            yield AIMessageChunk(content="5")
+
+    def _build(**kwargs):
+        built_with.update(kwargs)
+        return _ThinkingLLM()
+
+    monkeypatch.setattr(functions, "ChatOllama", _build)
+
+    chunks = [
+        c async for c in functions.astream_bot_response(tool_test_model, "8b", "2+3?", "", [], reasoning=True)
+    ]
+
+    assert chunks == [functions.ThinkingDelta("Let me add. "), "5"]
+    assert built_with["reasoning"] is True
+
+
+async def test_structured_output_constrains_decoding_with_the_schema(tool_test_model, monkeypatch):
+    monkeypatch.setattr(
+        functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
+    )
+    built_with: dict = {}
+
+    class _JsonLLM:
+        async def ainvoke(self, messages):
+            return AIMessageChunk(content='{"city": "Paris", "population": 2.1}')
+
+    def _build(**kwargs):
+        built_with.update(kwargs)
+        return _JsonLLM()
+
+    monkeypatch.setattr(functions, "ChatOllama", _build)
+
+    result = await functions.astream_structured_bot_response(
+        tool_test_model, "8b", "Capital of France?", "", [],
+        [{"field": "city", "type": "string"}, {"field": "population", "type": "number"}],
+    )
+
+    assert isinstance(built_with["format"], dict)
+    assert set(built_with["format"]["properties"]) == {"city", "population"}
+    assert built_with["format"]["required"] == ["city", "population"]
+    assert '"city": "Paris"' in result

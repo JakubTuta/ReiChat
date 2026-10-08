@@ -54,6 +54,32 @@ def capabilities(show_info: dict[str, typing.Any]) -> list[str]:
     return [c for c in show_info.get("capabilities") or [] if isinstance(c, str)]
 
 
+class ThinkingControls(typing.TypedDict):
+    # What `think` accepts for this model: booleans for on/off, strings for
+    # named levels (e.g. gpt-oss's "low"/"medium"/"high").
+    values: list[bool | str]
+    default: bool | str
+
+
+def thinking_controls(show_info: dict[str, typing.Any]) -> ThinkingControls | None:
+    """None when the model can't think at all. Older Ollama versions list
+    the "thinking" capability without the `thinking` metadata block — plain
+    on/off is assumed then, defaulting to on like Ollama does."""
+    if "thinking" not in capabilities(show_info):
+        return None
+
+    raw = show_info.get("thinking") or {}
+    values = [v for v in raw.get("values") or [] if isinstance(v, (bool, str))] or [False, True]
+    if values == [False]:
+        return None
+
+    default = raw.get("default")
+    if not isinstance(default, (bool, str)):
+        default = True
+
+    return {"values": values, "default": default}
+
+
 class RunningModel(typing.TypedDict):
     name: str
     size: int

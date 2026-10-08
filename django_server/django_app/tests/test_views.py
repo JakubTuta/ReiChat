@@ -44,8 +44,8 @@ def test_get_chat_history_returns_active_path_with_branch_metadata(client, branc
 
     assert response.status_code == 200
     assert response.json() == [
-        {"role": "user", "content": "Hi", "image": "", "sibling_count": 1, "sibling_index": 0},
-        {"role": "assistant", "content": "Hi again", "image": "", "sibling_count": 2, "sibling_index": 1},
+        {"role": "user", "content": "Hi", "image": "", "thinking": "", "sibling_count": 1, "sibling_index": 0},
+        {"role": "assistant", "content": "Hi again", "image": "", "thinking": "", "sibling_count": 2, "sibling_index": 1},
     ]
 
 
@@ -58,8 +58,8 @@ def test_patch_switch_branch_moves_active_leaf_to_chosen_sibling(client, branchi
 
     assert response.status_code == 200
     assert response.json() == [
-        {"role": "user", "content": "Hi", "image": "", "sibling_count": 1, "sibling_index": 0},
-        {"role": "assistant", "content": "Hello", "image": "", "sibling_count": 2, "sibling_index": 0},
+        {"role": "user", "content": "Hi", "image": "", "thinking": "", "sibling_count": 1, "sibling_index": 0},
+        {"role": "assistant", "content": "Hello", "image": "", "thinking": "", "sibling_count": 2, "sibling_index": 0},
     ]
 
     branching_chat.refresh_from_db()
@@ -348,6 +348,7 @@ def test_get_all_chats_includes_persona(client, chat):
             "active_collections": [],
             "tools_enabled": False,
             "memory_mode": "trim",
+            "think_level": "",
             "continued_from": None,
         },
     ]
@@ -397,7 +398,7 @@ def test_continue_chat_copies_settings_and_links_the_source(client, chat):
 def test_chat_context_estimates_memory_use_before_sending(client, chat, monkeypatch):
     from django_app import functions
 
-    monkeypatch.setattr(functions, "get_model_context_length", lambda model, params: 4096)
+    monkeypatch.setattr(functions, "get_model_info", lambda model, params: {"context_length": 4096, "thinking": None})
     user = models.ChatMessage.objects.create(chat=chat, role="user", content="word " * 700)
     reply = models.ChatMessage.objects.create(chat=chat, parent=user, role="assistant", content="ok")
     chat.active_leaf = reply

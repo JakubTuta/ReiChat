@@ -27,6 +27,46 @@ class ModelUnavailableError(Exception):
     pass
 
 
+class ThinkingDelta(typing.NamedTuple):
+    """A piece of a thinking model's reasoning, streamed separately from
+    the answer itself — yielded alongside plain `str` answer chunks."""
+
+    text: str
+
+
+class ModelInfo(typing.TypedDict):
+    context_length: int | None
+    thinking: ollama_api.ThinkingControls | None
+
+
+# ChatHistory.think_level values besides "" (use the model's default) and a
+# model-specific level name.
+THINK_OFF = "off"
+THINK_ON = "on"
+
+
+def resolve_reasoning(think_level: str, info: ModelInfo | None) -> bool | str | None:
+    """The `reasoning` value for ChatOllama. None only for models that
+    can't think: for a thinking model, None would let Ollama think anyway
+    (most default to it) while langchain-ollama throws the separate
+    thinking text away — the user would just stare at a long silence."""
+    controls = info["thinking"] if info else None
+    if controls is None:
+        return None
+
+    values = controls["values"]
+    if think_level == THINK_OFF:
+        return False if False in values else controls["default"]
+    if think_level == THINK_ON:
+        return True if True in values else controls["default"]
+    if think_level and think_level in values:
+        return think_level
+
+    default = controls["default"]
+    # "Model default = don't think" stays off rather than becoming None.
+    return default
+
+
 class GenerationParams(typing.TypedDict, total=False):
     """Per-chat ChatOllama overrides. A key's absence (or a None value) means
     "use Ollama's own default" — these are genuinely optional, not settings
@@ -102,7 +142,10 @@ async def astream_bot_response(
     system_prompt: str | None = None,
     generation_params: GenerationParams | None = None,
     stats: GenerationStats | None = None,
-) -> typing.AsyncGenerator[str, None]:
+    reasoning: bool | str | None = None,
+) -> typing.AsyncGenerator[str | ThinkingDelta, None]:
+    """Yields answer text as `str`, and — only when `reasoning` is set —
+    the model's reasoning as ThinkingDelta."""
     # get_ollama_url talks to the Docker SDK, which is blocking I/O — run it
     # off the event loop so one chat's container lookup can't stall every
     # other concurrent chat's ASGI worker.
@@ -126,7 +169,7 @@ async def astream_bot_response(
         messages = [{"role": "system", "content": system_prompt}, *messages]
 
     llm = _build_chat_ollama(
-        base_url, full_model_string, **_chat_ollama_kwargs(generation_params)
+        base_url, full_model_string, reasoning=reasoning, **_chat_ollama_kwargs(generation_params)
     )
 
     # `stats` is a mutable out-param rather than a return value: an async
@@ -136,7 +179,10 @@ async def astream_bot_response(
     # in and reads it once the loop finishes.
     try:
         async for chunk in llm.astream(messages):
-            yield chunk.text
+            if thinking := chunk.additional_kwargs.get("reasoning_content"):
+                yield ThinkingDelta(thinking)
+            if text := chunk.text:
+                yield text
             if chunk.response_metadata:
                 _record_generation_stats(stats, chunk.response_metadata)
     except httpx.HTTPError as e:
@@ -166,7 +212,8 @@ async def astream_tool_response(
     generation_params: GenerationParams | None = None,
     stats: GenerationStats | None = None,
     mcp_servers: list[models.MCPServer] | None = None,
-) -> typing.AsyncGenerator[str | ToolCallInfo, None]:
+    reasoning: bool | str | None = None,
+) -> typing.AsyncGenerator[str | ThinkingDelta | ToolCallInfo, None]:
     """Like astream_bot_response, but binds the built-in tool set (plus any
     enabled MCP servers' tools) and runs the tool-call loop: ask the model,
     execute whatever tools it asks for, feed the results back, repeat until
@@ -218,7 +265,7 @@ async def astream_tool_response(
         mcp_lookup = registry.lookup
 
     llm = _build_chat_ollama(
-        base_url, full_model_string, **_chat_ollama_kwargs(generation_params)
+        base_url, full_model_string, reasoning=reasoning, **_chat_ollama_kwargs(generation_params)
     )
     llm_with_tools = llm.bind_tools(tool_specs)
 
@@ -228,6 +275,8 @@ async def astream_tool_response(
 
             async for chunk in llm_with_tools.astream(lc_messages):
                 gathered = chunk if gathered is None else gathered + chunk
+                if thinking := chunk.additional_kwargs.get("reasoning_content"):
+                    yield ThinkingDelta(thinking)
                 if text := chunk.text:
                     yield text
                 if chunk.response_metadata:
@@ -342,10 +391,14 @@ Your response should be valid JSON only, with no other text or explanation."""
     system_msg = {"role": "system", "content": system_message}
     messages = _map_history(history) + [system_msg, new_message]
 
+    # The schema itself, not just "json": Ollama compiles it into a grammar
+    # that constrains decoding, so the reply can't come back with missing
+    # fields or the wrong types. The instructions above stay because models
+    # still fill fields better when told what each one is for.
     llm = _build_chat_ollama(
         base_url,
         full_model_string,
-        format="json",
+        format=json_schema,
         **_chat_ollama_kwargs(generation_params),
     )
 
@@ -488,10 +541,11 @@ def deserialize_messages(messages) -> list[dict[str, typing.Any]]:
     ]
 
 
-def get_model_context_length(model_name: str, parameters: str) -> int | None:
-    """The model's trained maximum context, read from its own Ollama
-    container — None when that can't be determined (container down, older
-    Ollama), in which case the caller just doesn't cap."""
+def get_model_info(model_name: str, parameters: str) -> ModelInfo | None:
+    """What the model's own Ollama container says about it: its trained
+    maximum context and whether/how it can think. None when that can't be
+    determined (container down, older Ollama) — callers then neither cap
+    the context nor offer thinking controls."""
     try:
         url_info = get_ollama_url(model_name, parameters)
     except ModelUnavailableError:
@@ -499,8 +553,14 @@ def get_model_context_length(model_name: str, parameters: str) -> int | None:
     if url_info is None:
         return None
 
-    info = ollama_api.show_model(*url_info)
-    return ollama_api.context_length(info) if info else None
+    show_info = ollama_api.show_model(*url_info)
+    if show_info is None:
+        return None
+
+    return {
+        "context_length": ollama_api.context_length(show_info),
+        "thinking": ollama_api.thinking_controls(show_info),
+    }
 
 
 def get_gpu_share(model_name: str, parameters: str) -> float | None:
@@ -751,6 +811,7 @@ def serialize_active_path_for_display(chat_history: models.ChatHistory) -> list[
                 "role": str(message.role),
                 "content": str(message.content),
                 "image": str(message.image) if message.image else "",
+                "thinking": str(message.thinking),
                 "sibling_count": len(sibling_ids),
                 "sibling_index": sibling_ids.index(message.id),
             }
@@ -764,6 +825,7 @@ def add_messages_to_history(
     user_content: str,
     assistant_content: str,
     image: str = "",
+    thinking: str = "",
 ) -> None:
     with transaction.atomic():
         parent = chat_history.active_leaf
@@ -779,6 +841,7 @@ def add_messages_to_history(
             parent=user_message,
             role="assistant",
             content=assistant_content,
+            thinking=thinking,
         )
         chat_history.active_leaf = assistant_message
         chat_history.save(update_fields=["active_leaf", "last_update_time"])
@@ -788,6 +851,7 @@ def commit_new_assistant_branch(
     chat_history: models.ChatHistory,
     parent_user_message: models.ChatMessage,
     assistant_content: str,
+    thinking: str = "",
 ) -> None:
     """Regenerate: adds a new sibling reply under the same user message
     instead of touching the old one. Only ever called once a new response
@@ -800,6 +864,7 @@ def commit_new_assistant_branch(
             parent=parent_user_message,
             role="assistant",
             content=assistant_content,
+            thinking=thinking,
         )
         chat_history.active_leaf = new_assistant
         chat_history.save(update_fields=["active_leaf", "last_update_time"])
@@ -811,6 +876,7 @@ def commit_new_exchange_branch(
     user_content: str,
     assistant_content: str,
     image: str = "",
+    thinking: str = "",
 ) -> None:
     """Edit-resend: branches a new user+assistant pair under the same parent
     the edited message had, leaving the old branch — and everything after
@@ -830,6 +896,7 @@ def commit_new_exchange_branch(
             parent=new_user,
             role="assistant",
             content=assistant_content,
+            thinking=thinking,
         )
         chat_history.active_leaf = new_assistant
         chat_history.save(update_fields=["active_leaf", "last_update_time"])

@@ -127,6 +127,9 @@ class ChatHistory(models.Model):
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="continuations"
     )
     seed_summary = models.TextField(default="", blank=True)
+    # "" = the model's own default; "off"/"on"; or a level name the model
+    # lists (e.g. "low"). See functions.resolve_reasoning.
+    think_level = models.TextField(default="", blank=True)
 
     def __str__(self) -> str:
         return self.title
@@ -140,6 +143,8 @@ class ChatMessage(models.Model):
     role = models.TextField()
     content = models.TextField()
     image = models.TextField(default="")
+    # A thinking model's reasoning for this reply, kept apart from the answer.
+    thinking = models.TextField(default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
