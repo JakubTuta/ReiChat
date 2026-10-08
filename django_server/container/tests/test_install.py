@@ -24,6 +24,7 @@ def manager(monkeypatch):
     monkeypatch.setattr(install, "ContainerManager", MagicMock(return_value=fake))
     monkeypatch.setattr(install.ContainerManager, "mark_installed", MagicMock())
     monkeypatch.setattr(install, "_progress", lambda *a: None)
+    monkeypatch.setattr(install, "_sync_custom_model_capabilities", lambda *a: None)
     return fake
 
 

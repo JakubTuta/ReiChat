@@ -23,6 +23,7 @@ class AIModelSerializer(serializers.ModelSerializer):
             "can_process_image",
             "is_embedding",
             "can_use_tools",
+            "is_custom",
             "versions",
             "index",
         ]

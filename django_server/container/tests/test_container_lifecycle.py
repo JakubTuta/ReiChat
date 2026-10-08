@@ -239,3 +239,8 @@ def test_recreate_refuses_containers_whose_weights_would_be_lost(connected_clien
         ContainerManager().recreate_on_current_image(legacy)
 
     legacy.remove.assert_not_called()
+
+
+def test_container_names_are_docker_safe_for_namespaced_models():
+    assert ContainerManager.container_name("hf.co/user/Repo-GGUF", "Q4_K_M") == "hf.co-user-Repo-GGUF_Q4_K_M"
+    assert ContainerManager.container_name("llama3.2", "3b") == "llama3.2_3b"

@@ -5,21 +5,22 @@ from . import views
 
 urlpatterns: list[URLPattern] = [
     path(
-        "chat-history/<str:model>/<str:chat_id>",
+        "chat-history/<path:model>/<str:chat_id>",
         views.ChatHistory.as_view(),
         name="chat_history",
     ),
-    path("all-chats/<str:model>", views.AllChats.as_view(), name="all_chats"),
-    path("chat-continue/<str:model>", views.ContinueChat.as_view(), name="chat_continue"),
-    path("chat-from-compare/<str:model>", views.ChatFromCompare.as_view(), name="chat_from_compare"),
-    path("chat-context/<str:model>/<str:chat_id>", views.ChatContext.as_view(), name="chat_context"),
+    path("all-chats/<path:model>", views.AllChats.as_view(), name="all_chats"),
+    path("chat-continue/<path:model>", views.ContinueChat.as_view(), name="chat_continue"),
+    path("chat-from-compare/<path:model>", views.ChatFromCompare.as_view(), name="chat_from_compare"),
+    path("chat-context/<path:model>/<str:chat_id>", views.ChatContext.as_view(), name="chat_context"),
     path("ai-models/", views.AIModels.as_view(), name="ai_models"),
     path("personas/", views.Personas.as_view(), name="personas"),
     path("prompt-templates/", views.PromptTemplates.as_view(), name="prompt_templates"),
-    path("search/<str:model>", views.Search.as_view(), name="search"),
+    path("search/<path:model>", views.Search.as_view(), name="search"),
     path("collections/", views.Collections.as_view(), name="collections"),
     path("documents/", views.Documents.as_view(), name="documents"),
     path("documents/chunk/", views.DocumentChunk.as_view(), name="document_chunk"),
     path("mcp-servers/", views.MCPServers.as_view(), name="mcp_servers"),
     path("mcp-servers/test/", views.MCPServerTest.as_view(), name="mcp_server_test"),
+    path("custom-models/", views.CustomModels.as_view(), name="custom_models"),
 ]

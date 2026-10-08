@@ -171,7 +171,7 @@ def _prune_missing(all_parsed_names: set[str], existing_by_name: dict[str, model
     pruned = 0
 
     for name, ai_model in list(existing_by_name.items()):
-        if name in all_parsed_names:
+        if name in all_parsed_names or ai_model.is_custom:
             continue
 
         if models.ChatHistory.objects.filter(ai_model=ai_model).exists():

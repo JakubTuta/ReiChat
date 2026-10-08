@@ -10,7 +10,9 @@ import threading
 
 from django.db import close_old_connections
 
-from django_app import progress_state
+from django_app import ollama_api, progress_state
+from django_app.catalog import registry
+from django_app.models import AIModel, AIModelVersion
 
 from .ContainerManager import ContainerError, ContainerManager
 
@@ -167,6 +169,31 @@ def _install(model_name: str, parameters: str, container_name: str, force_pull: 
         )
 
     ContainerManager.mark_installed(container)
+    _sync_custom_model_capabilities(model_name, parameters, base_url)
+
+
+def _sync_custom_model_capabilities(model_name: str, parameters: str, base_url: str) -> None:
+    """A model added by name has no ollama.com listing to say whether it
+    can see images or use tools — ask the model itself once it's in."""
+    ai_model = AIModel.objects.filter(model=model_name, is_custom=True).first()
+    if ai_model is None:
+        return
+
+    info = ollama_api.show_model(base_url, f"{model_name}:{parameters}")
+    if info is None:
+        return
+
+    capabilities = set(ollama_api.capabilities(info))
+    ai_model.can_process_image = "vision" in capabilities
+    ai_model.can_use_tools = "tools" in capabilities
+    ai_model.is_embedding = capabilities == {"embedding"}
+    ai_model.save(update_fields=["can_process_image", "can_use_tools", "is_embedding"])
+
+    sizes = ollama_api.installed_model_sizes(base_url) or {}
+    if size := sizes.get(f"{model_name}:{parameters}"):
+        AIModelVersion.objects.filter(ai_model=ai_model, parameters=parameters).update(
+            size_bytes=size, size=registry.format_size(size)
+        )
 
 
 def _progress(container_name: str, phase: str, percent: int, detail: str) -> None:

@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 
 from asgiref.sync import async_to_sync
@@ -106,6 +107,66 @@ class AIModels(APIView):
             {"status": "Catalog refresh started"},
             status=status.HTTP_202_ACCEPTED,
         )
+
+
+# Any Ollama model reference: a library name ("llama3.2"), a namespaced
+# one ("user/model"), or a Hugging Face GGUF ("hf.co/user/repo"), plus an
+# optional ":tag" (a size or a quantization like Q4_K_M).
+_MODEL_REFERENCE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*(/[A-Za-z0-9._-]+)*(:[A-Za-z0-9._-]+)?$")
+
+
+class CustomModels(APIView):
+    @decorators.required_body_params(["reference"])
+    def post(self, request: Request) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+        reference = str(request_data["reference"]).strip()
+        if reference.startswith(("https://", "http://")):
+            reference = reference.split("://", 1)[1]
+
+        if not _MODEL_REFERENCE_RE.match(reference) or len(reference) > 200:
+            return Response(
+                {"error": "That doesn't look like a model name. Use something like llama3.2:3b or "
+                          "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        model_name, _, tag = reference.partition(":")
+        tag = tag or "latest"
+
+        ai_model, created = models.AIModel.objects.get_or_create(
+            model=model_name,
+            defaults={
+                "name": model_name.rsplit("/", 1)[-1],
+                "description": "Added by you by name.",
+                "is_custom": True,
+            },
+        )
+        models.AIModelVersion.objects.get_or_create(
+            ai_model=ai_model, parameters=tag, defaults={"size": "unknown"}
+        )
+
+        return Response(
+            serializers.AIModelSerializer(ai_model).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @decorators.required_body_params(["id"])
+    def delete(self, request: Request) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+        ai_model = models.AIModel.objects.filter(id=request_data["id"], is_custom=True).first()
+
+        if ai_model is None:
+            return Response({"error": "Custom model not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # AIModel cascades into ChatHistory — never take a user's chats with it.
+        if models.ChatHistory.objects.filter(ai_model=ai_model).exists():
+            return Response(
+                {"error": "This model still has chats. Delete them or move them to another model first."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        ai_model.delete()
+        return Response({"status": "Custom model removed"}, status=status.HTTP_200_OK)
 
 
 class Personas(APIView):

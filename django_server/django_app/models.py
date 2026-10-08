@@ -19,6 +19,9 @@ class AIModel(models.Model):
         "gates whether the tool-calling toggle is offered for it.",
     )
     index = models.IntegerField(default=0)
+    # Added by the user by name (any Ollama tag, e.g. a Hugging Face GGUF),
+    # not scraped from ollama.com — so catalog refreshes leave it alone.
+    is_custom = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         return self.model

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 import time
 import typing
@@ -41,6 +42,9 @@ _METADATA_LABELS = {"model": LABEL_MODEL, "parameters": LABEL_PARAMETERS, "port"
 # container runtime (macOS, AMD/Intel, CPU-only Linux/Windows) or with the
 # runtime but no working driver.
 _GPU_UNAVAILABLE_MARKERS = ("could not select device driver", "nvidia", "gpu")
+
+
+_UNSAFE_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_.-]")
 
 
 class ContainerError(Exception):
@@ -98,7 +102,9 @@ class ContainerManager:
 
     @staticmethod
     def container_name(model: str, parameters: str) -> str:
-        return f"{model}_{parameters}"
+        # Docker names allow [a-zA-Z0-9_.-] only; custom models can be
+        # namespaced ("hf.co/user/repo"), so anything else becomes "-".
+        return _UNSAFE_NAME_CHARS.sub("-", f"{model}_{parameters}")
 
     @staticmethod
     def volume_name(container_name: str) -> str:

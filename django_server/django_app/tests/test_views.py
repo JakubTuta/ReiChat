@@ -1131,3 +1131,47 @@ def test_compare_answer_becomes_a_chat(client, chat):
         ("user", "Capital of France?", ""),
         ("assistant", "Paris.", "llama3.1:8b"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("reference", "model", "tag"),
+    [
+        ("hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M", "hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF", "Q4_K_M"),
+        ("https://hf.co/user/repo", "hf.co/user/repo", "latest"),
+        ("someuser/coolmodel:7b", "someuser/coolmodel", "7b"),
+    ],
+)
+def test_custom_model_is_added_by_reference(client, reference, model, tag):
+    response = client.post("/custom-models/", data=json.dumps({"reference": reference}), content_type="application/json")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["model"] == model
+    assert body["is_custom"] is True
+    assert [v["parameters"] for v in body["versions"]] == [tag]
+
+
+def test_custom_model_rejects_nonsense(client):
+    response = client.post(
+        "/custom-models/", data=json.dumps({"reference": "rm -rf /; echo"}), content_type="application/json"
+    )
+
+    assert response.status_code == 400
+
+
+def test_custom_model_with_chats_is_not_deleted(client):
+    ai_model = models.AIModel.objects.create(name="repo", model="hf.co/u/repo", is_custom=True)
+    models.ChatHistory.objects.create(ai_model=ai_model)
+
+    response = client.delete("/custom-models/", data=json.dumps({"id": ai_model.id}), content_type="application/json")
+
+    assert response.status_code == 409
+    assert models.AIModel.objects.filter(id=ai_model.id).exists()
+
+
+def test_routes_accept_model_names_with_slashes(client):
+    ai_model = models.AIModel.objects.create(name="repo", model="hf.co/u/repo", is_custom=True)
+    chat = models.ChatHistory.objects.create(ai_model=ai_model)
+
+    assert client.get("/all-chats/hf.co/u/repo").status_code == 200
+    assert client.get(f"/chat-history/hf.co/u/repo/{chat.id}").status_code == 200
