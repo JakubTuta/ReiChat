@@ -444,6 +444,21 @@ export const useChatStore = defineStore('chat', () => {
     return false
   }
 
+  const addCustomModel = async (reference: string): Promise<{ model: string, parameters: string } | null> => {
+    try {
+      const response = await api.value.post('custom-models/', { reference })
+      await fetchAIModels()
+
+      return { model: response.data.model, parameters: response.data.versions[0]?.parameters ?? 'latest' }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not add that model.')
+    }
+
+    return null
+  }
+
   const moveChat = async (fromModel: string, chatId: string, toModel: string): Promise<boolean> => {
     try {
       const response = await api.value.put(`all-chats/${fromModel}`, { id: chatId, move_to_model: toModel })
@@ -542,6 +557,7 @@ export const useChatStore = defineStore('chat', () => {
     applyReplyContext,
     setChatMemory,
     setChatThinkLevel,
+    addCustomModel,
     moveChat,
     chatFromCompare,
     continueChat,

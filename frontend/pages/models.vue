@@ -3,6 +3,7 @@ import type { IAIModel, IAIModelVersion } from '~/models/aiModel'
 import type { FitLabel } from '~/models/hardware'
 import { computeFitLabel } from '~/models/hardware'
 import { OLLAMA_UPDATE_KEY } from '~/stores/containerStore'
+import { containerNameFor } from '~/utils/containerName'
 
 const router = useRouter()
 
@@ -18,7 +19,14 @@ const { hardware, diskUsage } = storeToRefs(hardwareStore)
 const snackbarStore = useSnackbarStore()
 
 const isOpenPullModelsDialog = ref(false)
+const addModelDialogOpen = ref(false)
+
 const search = ref('')
+function installAddedModel(added: { model: string, parameters: string }) {
+  containerStore.runContainer(added)
+  search.value = added.model.split('/').pop() ?? added.model
+  snackbarStore.showSnackbarInfo('Downloading — progress shows on the model\'s card.')
+}
 const sort = ref('popularityDecreasing')
 const filter = ref('all')
 const selectedVersions = ref<Record<string, IAIModelVersion | null>>({})
@@ -160,7 +168,7 @@ const preparedAIModels = computed(() => {
     .sort(sortFn)
     .map((model) => {
       const filteredVersions = model.versions.filter((version) => {
-        const containerName = `${model.model}_${version.parameters}`
+        const containerName = containerNameFor(model.model, version.parameters)
         const containerStatus = getContainerStatusByName(containerName)
 
         return filterFn(containerStatus)
@@ -205,7 +213,7 @@ function getContainerName(model: IAIModel): string | null {
   if (!selectedVersions.value[model.model])
     return null
 
-  return `${model.model}_${selectedVersions.value[model.model]!.parameters}`
+  return containerNameFor(model.model, selectedVersions.value[model.model]!.parameters)
 }
 
 function getContainerStatusByName(containerName: string): string {
@@ -240,7 +248,7 @@ function isOperationLoading(model: IAIModel): boolean {
 }
 
 function getInstalledVersionCount(model: IAIModel): number {
-  return model.versions.filter(v => getContainerStatusByName(`${model.model}_${v.parameters}`) !== 'not_found',
+  return model.versions.filter(v => getContainerStatusByName(containerNameFor(model.model, v.parameters)) !== 'not_found',
   ).length
 }
 
@@ -259,7 +267,7 @@ watch([aiModels, containers], () => {
       continue
 
     const installedVersion = model.versions.find(
-      v => getContainerStatusByName(`${model.model}_${v.parameters}`) !== 'not_found',
+      v => getContainerStatusByName(containerNameFor(model.model, v.parameters)) !== 'not_found',
     )
 
     if (installedVersion)
@@ -490,7 +498,7 @@ function createContainerCommand(model: IAIModel): string[] {
   if (!selectedVersions.value[model.model])
     return []
   const parameters = selectedVersions.value[model.model]!.parameters
-  const containerName = `${model.model}_${parameters}`
+  const containerName = containerNameFor(model.model, parameters)
   const containerPort = getContainerPort(model)
 
   const gpuFlag = hardware.value.gpu_available === false
@@ -516,7 +524,7 @@ function startContainerCommand(model: IAIModel): string[] {
   if (!selectedVersions.value[model.model])
     return []
   const parameters = selectedVersions.value[model.model]!.parameters
-  const containerName = `${model.model}_${parameters}`
+  const containerName = containerNameFor(model.model, parameters)
 
   return [`docker start ${containerName}`]
 }
@@ -525,7 +533,7 @@ function stopContainerCommand(model: IAIModel): string[] {
   if (!selectedVersions.value[model.model])
     return []
   const parameters = selectedVersions.value[model.model]!.parameters
-  const containerName = `${model.model}_${parameters}`
+  const containerName = containerNameFor(model.model, parameters)
 
   return [`docker stop ${containerName}`]
 }
@@ -537,7 +545,7 @@ function removeContainerCommand(model: IAIModel): string[] {
   const stopCmds = ['running', 'pulling_model', 'starting', 'incomplete'].includes(containerStatus)
     ? stopContainerCommand(model)
     : []
-  const containerName = `${model.model}_${selectedVersions.value[model.model]!.parameters}`
+  const containerName = containerNameFor(model.model, selectedVersions.value[model.model]!.parameters)
 
   return [...stopCmds, `docker rm ${containerName}`, `docker volume rm reichat-ollama-${containerName}`]
 }
@@ -644,6 +652,14 @@ const catalogueButtonLabel = computed(() => {
       </div>
 
       <div class="models-header-actions">
+        <v-btn
+          variant="outlined"
+          rounded="lg"
+          @click="addModelDialogOpen = true"
+        >
+          Add by name
+        </v-btn>
+
         <v-btn
           variant="outlined"
           rounded="lg"
@@ -790,6 +806,11 @@ const catalogueButtonLabel = computed(() => {
             v-if="getInstalledVersionCount(model)"
             class="badge badge--grey"
           >{{ getInstalledVersionCount(model) }} INSTALLED</span>
+
+          <span
+            v-if="model.is_custom"
+            class="badge badge--grey"
+          >ADDED BY YOU</span>
 
           <span class="model-card-popularity font-mono">★ {{ formatNumber(model.popularity) }}</span>
         </div>
@@ -990,6 +1011,11 @@ const catalogueButtonLabel = computed(() => {
     confirm-color="red"
     @confirm="confirmRemoveContainer"
     @cancel="cancelRemoveContainer"
+  />
+
+  <AddModelDialog
+    v-model="addModelDialogOpen"
+    @added="installAddedModel"
   />
 </template>
 

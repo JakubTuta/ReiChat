@@ -14,6 +14,8 @@ export interface IAIModel {
   can_process_image: boolean
   is_embedding: boolean
   can_use_tools: boolean
+  // Added by the user by name rather than listed on ollama.com.
+  is_custom: boolean
   versions: IAIModelVersion[]
   index: number
 }
@@ -28,6 +30,7 @@ export function mapAIModel(data: Partial<IAIModel>): IAIModel {
     can_process_image: data.can_process_image || false,
     is_embedding: data.is_embedding || false,
     can_use_tools: data.can_use_tools || false,
+    is_custom: data.is_custom || false,
     versions: data.versions || [],
     index: data.index || 0,
   }

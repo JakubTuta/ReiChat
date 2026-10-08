@@ -14,6 +14,7 @@ function model(name: string, versions: [string, number][]): IAIModel {
     can_process_image: false,
     is_embedding: false,
     can_use_tools: false,
+    is_custom: false,
     index: 0,
     versions: versions.map(([parameters, gb]) => ({ parameters, size: '', size_bytes: gb * GB, verified_at: null })),
   }

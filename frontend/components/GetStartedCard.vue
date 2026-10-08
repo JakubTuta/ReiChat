@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Recommendation } from '~/utils/recommend'
+import { containerNameFor } from '~/utils/containerName'
 import { recommendModels } from '~/utils/recommend'
 
 const chatStore = useChatStore()
@@ -37,7 +38,7 @@ watch(options, (list) => {
 }, { immediate: true })
 
 function keyOf(r: Recommendation): string {
-  return `${r.model.model}_${r.version.parameters}`
+  return containerNameFor(r.model.model, r.version.parameters)
 }
 
 const progress = computed(() => (installingKey.value

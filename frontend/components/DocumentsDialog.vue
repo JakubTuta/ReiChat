@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { IAIModel } from '~/models/aiModel'
 import type { IDocument, IDocumentCollection } from '~/models/document'
+import { containerNameFor } from '~/utils/containerName'
 
 const props = defineProps<{
   chatId: string
@@ -29,7 +30,7 @@ const installedEmbeddingModels = computed(() => props.embeddingModels
 const recommendedAvailable = computed(() => props.embeddingModels.some(m => m.model === RECOMMENDED_EMBEDDER.model
   && m.versions.some(v => v.parameters === RECOMMENDED_EMBEDDER.parameters)))
 
-const recommendedProgress = computed(() => pullProgress.value[`${RECOMMENDED_EMBEDDER.model}_${RECOMMENDED_EMBEDDER.parameters}`] ?? null)
+const recommendedProgress = computed(() => pullProgress.value[containerNameFor(RECOMMENDED_EMBEDDER.model, RECOMMENDED_EMBEDDER.parameters)] ?? null)
 
 async function installRecommendedEmbedder() {
   await containerStore.runContainer(RECOMMENDED_EMBEDDER)
