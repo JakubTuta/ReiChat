@@ -8,7 +8,8 @@ import { containerNameFor } from '~/utils/containerName'
 const router = useRouter()
 
 const containerStore = useContainerStore()
-const { containers, loadingOperation, pullProgress, scrapeProgress, loadedModels } = storeToRefs(containerStore)
+const { containers, loadingOperation, pullProgress, scrapeProgress, loadedModels, isExternal, connection } = storeToRefs(containerStore)
+const connectionDialogOpen = ref(false)
 
 const chatStore = useChatStore()
 const { aiModels, loading } = storeToRefs(chatStore)
@@ -106,6 +107,7 @@ onMounted(async () => {
   hardwareStore.fetchHardware()
   hardwareStore.fetchDiskUsage()
 
+  containerStore.fetchConnection()
   containerStore.fetchRuntime()
   runtimeTimer = setInterval(() => containerStore.fetchRuntime(), RUNTIME_POLL_MS)
 })
@@ -383,6 +385,9 @@ function getPrimaryAction(model: IAIModel): ActionConfig {
     return { label: 'Starting…', primary: false, disabled: true, loading: true, handler: () => {} }
   }
 
+  if (containerStatus === 'running' && isExternal.value)
+    return { label: 'Installed', primary: false, disabled: true, loading: false, handler: () => {} }
+
   if (containerStatus === 'running') {
     return {
       label: 'Stop container',
@@ -447,7 +452,9 @@ const removeConfirmMessage = computed(() => {
   if (!model || !version)
     return ''
 
-  return `This deletes the "${model.name}" (${version.parameters}) container and frees ~${version.size} of disk space. This cannot be undone.`
+  return isExternal.value
+    ? `This deletes "${model.name}" (${version.parameters}) from your Ollama and frees ~${version.size} of disk space. This cannot be undone.`
+    : `This deletes the "${model.name}" (${version.parameters}) container and frees ~${version.size} of disk space. This cannot be undone.`
 })
 
 function removeContainer(model: IAIModel) {
@@ -653,6 +660,18 @@ const catalogueButtonLabel = computed(() => {
 
       <div class="models-header-actions">
         <v-btn
+          variant="text"
+          rounded="lg"
+          prepend-icon="mdi-server"
+          title="Change where models run"
+          @click="connectionDialogOpen = true"
+        >
+          {{ isExternal
+            ? 'Your Ollama'
+            : 'Managed by ReiChat' }}
+        </v-btn>
+
+        <v-btn
           variant="outlined"
           rounded="lg"
           @click="addModelDialogOpen = true"
@@ -661,6 +680,7 @@ const catalogueButtonLabel = computed(() => {
         </v-btn>
 
         <v-btn
+          v-if="!isExternal"
           variant="outlined"
           rounded="lg"
           :loading="!!ollamaUpdateProgress"
@@ -690,7 +710,21 @@ const catalogueButtonLabel = computed(() => {
     />
 
     <div
-      v-if="hardware.gpu_available === false"
+      v-if="isExternal"
+      class="cpu-hint"
+    >
+      <v-icon size="16">
+        mdi-server
+      </v-icon>
+
+      <span>
+        Using your own Ollama at <strong>{{ connection.url }}</strong>. Models you install here are downloaded
+        there, and everything already on it is listed.
+      </span>
+    </div>
+
+    <div
+      v-if="hardware.gpu_available === false && !isExternal"
       class="cpu-hint"
     >
       <v-icon size="16">
@@ -944,7 +978,7 @@ const catalogueButtonLabel = computed(() => {
             <span class="action-row-spacer" />
 
             <v-expansion-panels
-              v-if="allCliCommands(model).length"
+              v-if="!isExternal && allCliCommands(model).length"
               class="advanced-panel"
               variant="accordion"
             >
@@ -1012,6 +1046,8 @@ const catalogueButtonLabel = computed(() => {
     @confirm="confirmRemoveContainer"
     @cancel="cancelRemoveContainer"
   />
+
+  <OllamaConnectionDialog v-model="connectionDialogOpen" />
 
   <AddModelDialog
     v-model="addModelDialogOpen"

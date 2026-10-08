@@ -24,11 +24,13 @@ all in your browser.
 
 - **Chat** with any model you install, with full conversation history, editable messages, and
   regenerate/branch support.
-- **Compare models** — run the same prompt across several installed models side by side.
+- **Compare models** — run the same prompt across several installed models side by side, openly or
+  as a blind test that keeps a scoreboard of your picks.
 - **Chat with your documents** — upload a PDF, Markdown, text or Word file and ask questions about
   it.
-- **Tool calling** — let a supporting model use built-in tools (calculator, current date/time), or
-  connect your own via [MCP](https://modelcontextprotocol.io).
+- **Tool calling** — let a supporting model use built-in tools (calculator, current date/time),
+  optional web search, or your own tools via [MCP](https://modelcontextprotocol.io) — tools from MCP
+  servers ask for your approval before they run.
 - **Prompt templates** — save reusable starter messages with fill-in-the-blank placeholders.
 - **Vision models** — attach an image to your message for models that support it.
 - **Thinking models** — watch models like Qwen 3 or DeepSeek-R1 reason before they answer, and
@@ -38,6 +40,8 @@ all in your browser.
 - **Any model** — besides the built-in list, install any Ollama model by name, including GGUF
   models from Hugging Face.
 - **Backups** — save all your chats and settings to one file and restore them anywhere.
+- **Your own Ollama** — already have the Ollama app (on a Mac it's the way to use the GPU)? Point
+  ReiChat at it from the Models page instead of letting it run models in Docker.
 
 ---
 

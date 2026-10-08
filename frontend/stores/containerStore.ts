@@ -31,6 +31,15 @@ export const useContainerStore = defineStore('container', () => {
   const loadingOperation = ref<string | null>(null)
   const pullProgress = ref<Record<string, PullProgressInfo>>({})
   const loadedModels = ref<LoadedModel[]>([])
+  // Where models run: app-managed containers, or the user's own Ollama.
+  const connection = ref<{ mode: 'managed' | 'external', url: string | null, version: string | null }>({
+    mode: 'managed',
+    url: null,
+    version: null,
+  })
+  // The backend's own explanation when the health check fails.
+  const systemMessage = ref('')
+  const isExternal = computed(() => connection.value.mode === 'external')
   const scrapeProgress = ref<ScrapeProgressInfo>({
     running: false,
     total: null,
@@ -162,6 +171,7 @@ export const useContainerStore = defineStore('container', () => {
 
     try {
       const response = await api.value.get(url)
+      systemMessage.value = ''
 
       return response.status === 200
         ? 'ok'
@@ -169,6 +179,7 @@ export const useContainerStore = defineStore('container', () => {
     }
     catch (error: any) {
       console.error(error)
+      systemMessage.value = error.response?.data?.error ?? ''
 
       // No `response` at all (or ERR_NETWORK) means the request never got
       // a reply from Django — the backend itself is down, not Docker.
@@ -227,6 +238,35 @@ export const useContainerStore = defineStore('container', () => {
     finally {
       if (loadingOperation.value === operationKey)
         loadingOperation.value = null
+    }
+  }
+
+  const fetchConnection = async () => {
+    try {
+      connection.value = (await api.value.get('/docker/ollama-connection/')).data
+    }
+    catch (error: any) {
+      console.error(error)
+    }
+  }
+
+  // Returns an error message to show, or '' on success.
+  const saveConnection = async (mode: 'managed' | 'external', url: string): Promise<string> => {
+    try {
+      connection.value = (await api.value.put('/docker/ollama-connection/', { mode, url })).data
+      await getUserContainers()
+      snackbarStore.showSnackbarSuccess(mode === 'external'
+        ? `Connected to your Ollama${connection.value.version
+          ? ` (version ${connection.value.version})`
+          : ''}.`
+        : 'ReiChat manages your models again.')
+
+      return ''
+    }
+    catch (error: any) {
+      console.error(error)
+
+      return error.response?.data?.error || 'Could not change where models run.'
     }
   }
 
@@ -328,6 +368,11 @@ export const useContainerStore = defineStore('container', () => {
     pullProgress,
     scrapeProgress,
     loadedModels,
+    connection,
+    systemMessage,
+    isExternal,
+    fetchConnection,
+    saveConnection,
     resetState,
     fetchRuntime,
     unloadModel,
