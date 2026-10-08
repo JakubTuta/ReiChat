@@ -183,7 +183,7 @@ def _prune_missing(all_parsed_names: set[str], existing_by_name: dict[str, model
             continue
 
         has_container = any(
-            container_manager.get_container(f"{ai_model.model}_{v.parameters}") is not None
+            container_manager.get_container(ContainerManager.container_name(ai_model.model, v.parameters)) is not None
             for v in ai_model.versions.all()
         )
         if has_container:

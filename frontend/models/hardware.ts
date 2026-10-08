@@ -1,6 +1,8 @@
 export interface IHardwareInfo {
   ram_bytes: number | null
   vram_bytes: number | null
+  // null until a container start has shown whether GPUs work on this host.
+  gpu_available?: boolean | null
 }
 
 export interface IDiskUsageEntry {
@@ -33,8 +35,13 @@ export function computeFitLabel(sizeBytes: number | null, hardware: IHardwareInf
   if (sizeBytes === null)
     return { label: 'unknown', availableBytes: null, source: 'none' }
 
-  const availableBytes = hardware.vram_bytes ?? hardware.ram_bytes
-  const source: FitResult['source'] = hardware.vram_bytes !== null
+  // Models run on the CPU (system RAM) when the host has no usable GPU,
+  // however much VRAM nvidia-smi might report.
+  const vramBytes = hardware.gpu_available === false
+    ? null
+    : hardware.vram_bytes
+  const availableBytes = vramBytes ?? hardware.ram_bytes
+  const source: FitResult['source'] = vramBytes !== null
     ? 'vram'
     : hardware.ram_bytes !== null
       ? 'ram'

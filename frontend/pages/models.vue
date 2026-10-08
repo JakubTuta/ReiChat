@@ -241,6 +241,8 @@ const STATUS_META: Record<string, { dot: string, label: string }> = {
   paused: { dot: 'grey-dot', label: 'container stopped' },
   restarting: { dot: 'amber', label: 'restarting' },
   pulling_model: { dot: 'amber', label: 'downloading' },
+  starting: { dot: 'amber', label: 'starting up' },
+  incomplete: { dot: 'amber', label: 'download didn\'t finish' },
   not_found: { dot: 'grey-dot', label: 'not installed' },
 }
 
@@ -308,6 +310,20 @@ function getPrimaryAction(model: IAIModel): ActionConfig {
     }
   }
 
+  if (containerStatus === 'incomplete') {
+    return {
+      label: 'Resume download',
+      primary: true,
+      disabled: false,
+      loading: false,
+      handler: () => resumeDownload(model),
+    }
+  }
+
+  if (containerStatus === 'starting') {
+    return { label: 'Starting…', primary: false, disabled: true, loading: true, handler: () => {} }
+  }
+
   if (containerStatus === 'running') {
     return {
       label: 'Stop container',
@@ -328,7 +344,7 @@ function getPrimaryAction(model: IAIModel): ActionConfig {
 function canRemove(model: IAIModel): boolean {
   const s = getContainerStatus(model)
 
-  return ['running', 'exited', 'paused', 'restarting', 'pulling_model'].includes(s)
+  return ['running', 'exited', 'paused', 'restarting', 'pulling_model', 'starting', 'incomplete'].includes(s)
 }
 
 function createContainer(model: IAIModel) {
@@ -343,6 +359,13 @@ function startContainer(model: IAIModel) {
     return
   containerStore.runContainer({ model: model.model, parameters: selectedVersions.value[model.model]!.parameters })
   snackbarStore.showSnackbarSuccess('Starting container')
+}
+
+function resumeDownload(model: IAIModel) {
+  if (!selectedVersions.value[model.model])
+    return
+  containerStore.runContainer({ model: model.model, parameters: selectedVersions.value[model.model]!.parameters })
+  snackbarStore.showSnackbarInfo('Resuming download — it continues from where it stopped')
 }
 
 function stopContainer(model: IAIModel) {
@@ -419,14 +442,18 @@ function createContainerCommand(model: IAIModel): string[] {
   const containerName = `${model.model}_${parameters}`
   const containerPort = getContainerPort(model)
 
+  const gpuFlag = hardware.value.gpu_available === false
+    ? ''
+    : `  --gpus=all ${escapeCharacter.value}\n`
   const createCommand = `docker run -d ${escapeCharacter.value}
   --name ${containerName} ${escapeCharacter.value}
   --network chatbot-network ${escapeCharacter.value}
-  --gpus=all ${escapeCharacter.value}
-  -p ${containerPort}:11434 ${escapeCharacter.value}
-  -e model=${model.model} ${escapeCharacter.value}
-  -e parameters=${parameters} ${escapeCharacter.value}
-  -e port=${containerPort} ${escapeCharacter.value}
+${gpuFlag}  -p ${containerPort}:11434 ${escapeCharacter.value}
+  -v reichat-ollama-${containerName}:/root/.ollama ${escapeCharacter.value}
+  --label reichat.managed=true ${escapeCharacter.value}
+  --label reichat.model=${model.model} ${escapeCharacter.value}
+  --label reichat.parameters=${parameters} ${escapeCharacter.value}
+  --label reichat.port=${containerPort} ${escapeCharacter.value}
   ollama/ollama:latest`
 
   const pullModelCommand = `docker exec -d ${containerName} ollama pull ${model.model}:${parameters}`
@@ -456,12 +483,12 @@ function removeContainerCommand(model: IAIModel): string[] {
   if (!selectedVersions.value[model.model])
     return []
   const containerStatus = getContainerStatus(model)
-  const stopCmds = ['running', 'pulling_model'].includes(containerStatus)
+  const stopCmds = ['running', 'pulling_model', 'starting', 'incomplete'].includes(containerStatus)
     ? stopContainerCommand(model)
     : []
   const containerName = `${model.model}_${selectedVersions.value[model.model]!.parameters}`
 
-  return [...stopCmds, `docker rm ${containerName}`]
+  return [...stopCmds, `docker rm ${containerName}`, `docker volume rm reichat-ollama-${containerName}`]
 }
 
 function allCliCommands(model: IAIModel): string[] {
@@ -473,7 +500,7 @@ function allCliCommands(model: IAIModel): string[] {
   const cmds: string[] = []
   if (['exited', 'paused'].includes(containerStatus))
     cmds.push(...startContainerCommand(model))
-  if (['running', 'paused', 'restarting', 'pulling_model'].includes(containerStatus))
+  if (['running', 'paused', 'restarting', 'pulling_model', 'starting', 'incomplete'].includes(containerStatus))
     cmds.push(...stopContainerCommand(model))
   cmds.push(...removeContainerCommand(model))
 
@@ -573,6 +600,20 @@ const catalogueButtonLabel = computed(() => {
       >
         {{ catalogueButtonLabel }}
       </v-btn>
+    </div>
+
+    <div
+      v-if="hardware.gpu_available === false"
+      class="cpu-hint"
+    >
+      <v-icon size="16">
+        mdi-chip
+      </v-icon>
+
+      <span>
+        No compatible graphics card (NVIDIA GPU) was found, so models run on your processor (CPU).
+        Everything works — answers just arrive more slowly. Smaller models (1–4B) feel best here.
+      </span>
     </div>
 
     <div class="filter-row">
@@ -732,7 +773,7 @@ const catalogueButtonLabel = computed(() => {
             <div class="pull-progress-row">
               <span>{{ getModelPullProgress(model)!.phase === 'image_pull_progress'
                 ? 'Downloading base image'
-                : 'Pulling model' }}</span>
+                : 'Downloading model' }}</span>
 
               <span class="font-mono">{{ getModelPullProgress(model)!.percent }}%</span>
             </div>
@@ -885,6 +926,20 @@ const catalogueButtonLabel = computed(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+.cpu-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  border: 1px solid var(--color-line);
+  background: var(--color-card);
+  color: var(--color-ink-2);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .search-field {

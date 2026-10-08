@@ -434,6 +434,14 @@ watch(waitingForResponse, (newValue) => {
           Model is still being pulled — sending will be enabled once it's ready.
         </template>
 
+        <template v-else-if="selectedModel.status === 'starting'">
+          Model is starting up — this takes a few seconds.
+        </template>
+
+        <template v-else-if="selectedModel.status === 'incomplete'">
+          This model's download didn't finish. Resume it on the Models page to start chatting.
+        </template>
+
         <template v-else>
           Container is not running.
         </template>

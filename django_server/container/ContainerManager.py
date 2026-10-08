@@ -14,11 +14,49 @@ from docker.models.images import Image
 from docker.models.networks import Network
 from docker.types.containers import DeviceRequest
 
+from django_app import progress_state
+
 from .models import ContainerPort
 
 logger = logging.getLogger(__name__)
 
 PORT_RANGE_START = 11434
+
+OLLAMA_IMAGE = "ollama/ollama"
+OLLAMA_DATA_PATH = "/root/.ollama"
+
+# Labels, not env vars, identify a container as ours and carry its metadata:
+# the old `ancestor=ollama/ollama:latest` filter stopped matching every
+# existing container as soon as that tag moved to a newer image, and env vars
+# leak into the Ollama process for no reason.
+LABEL_MANAGED = "reichat.managed"
+LABEL_MODEL = "reichat.model"
+LABEL_PARAMETERS = "reichat.parameters"
+LABEL_PORT = "reichat.port"
+LABEL_GPU = "reichat.gpu"
+
+_METADATA_LABELS = {"model": LABEL_MODEL, "parameters": LABEL_PARAMETERS, "port": LABEL_PORT}
+
+# What Docker says when a GPU is requested on a host without the NVIDIA
+# container runtime (macOS, AMD/Intel, CPU-only Linux/Windows) or with the
+# runtime but no working driver.
+_GPU_UNAVAILABLE_MARKERS = ("could not select device driver", "nvidia", "gpu")
+
+
+class ContainerError(Exception):
+    """A container operation failed; the message is written for the UI."""
+
+
+def _docker_error_text(error: docker.errors.APIError) -> str:
+    explanation = error.explanation
+    if isinstance(explanation, bytes):
+        explanation = explanation.decode(errors="replace")
+    return str(explanation or error)
+
+
+def _is_gpu_unavailable_error(error: docker.errors.APIError) -> bool:
+    text = _docker_error_text(error).lower()
+    return any(marker in text for marker in _GPU_UNAVAILABLE_MARKERS)
 
 
 class ContainerManager:
@@ -28,6 +66,11 @@ class ContainerManager:
         "PAUSED": "paused",
         "RESTARTING": "restarting",
         "PULLING_MODEL": "pulling_model",
+        # Running, but Ollama inside hasn't answered yet.
+        "STARTING": "starting",
+        # Running and reachable, but the model isn't in it — a download that
+        # failed or was interrupted (e.g. the backend restarted mid-pull).
+        "INCOMPLETE": "incomplete",
     }
 
     # A module-level singleton, not a per-instance client — ContainerManager()
@@ -36,6 +79,15 @@ class ContainerManager:
     _client: docker.DockerClient | None = None
     _client_lock = threading.Lock()
 
+    # None until the first container start tells us either way.
+    _gpu_supported: bool | None = None
+
+    # Container ids whose model Ollama has confirmed it holds. A model only
+    # disappears when its container is removed, so once confirmed this never
+    # needs asking again — it keeps /api/tags off the 2s snapshot path.
+    _installed_ids: set[str] = set()
+    _installed_lock = threading.Lock()
+
     def __init__(self) -> None:
         if ContainerManager._client is None:
             self.connect_to_docker()
@@ -43,6 +95,14 @@ class ContainerManager:
     @property
     def client(self) -> docker.DockerClient | None:
         return ContainerManager._client
+
+    @staticmethod
+    def container_name(model: str, parameters: str) -> str:
+        return f"{model}_{parameters}"
+
+    @staticmethod
+    def volume_name(container_name: str) -> str:
+        return f"reichat-ollama-{container_name}"
 
     def is_connected(self) -> bool:
         if ContainerManager._client is None:
@@ -77,7 +137,7 @@ class ContainerManager:
             return False
 
         try:
-            self.client.images.get("ollama/ollama")
+            self.client.images.get(OLLAMA_IMAGE)
 
             return True
 
@@ -88,7 +148,7 @@ class ContainerManager:
         if not self.is_connected() or self.client is None:
             return None
 
-        return self.client.images.pull("ollama/ollama", "latest")
+        return self.client.images.pull(OLLAMA_IMAGE, "latest")
 
     def ensure_ollama_image(self, progress_cb: typing.Callable | None = None) -> bool:
         if not self.is_connected() or self.client is None:
@@ -105,7 +165,7 @@ class ContainerManager:
             current_layer_id: str = ""
 
             for event in self.client.api.pull(
-                "ollama/ollama", tag="latest", stream=True, decode=True
+                OLLAMA_IMAGE, tag="latest", stream=True, decode=True
             ):
                 layer_id = event.get("id", "")
                 progress_detail = event.get("progressDetail") or {}
@@ -140,28 +200,42 @@ class ContainerManager:
             logger.error("Error pulling ollama image: %s", e)
             return False
 
+    @staticmethod
+    def is_managed_container(container: Container) -> bool:
+        if ContainerManager._labels(container).get(LABEL_MANAGED) == "true":
+            return True
+
+        # Containers created before labels existed: still ours if they run the
+        # Ollama image and carry the model env var the old code set.
+        image = container.attrs.get("Config", {}).get("Image", "") or ""
+        return image.startswith(OLLAMA_IMAGE) and (
+            ContainerManager.get_container_metadata(container, "model") is not None
+        )
+
     def get_available_containers(self) -> list[dict[str, str]]:
         if not self.is_connected() or self.client is None:
             return []
 
-        all_containers: list[Container] = self.client.containers.list(
-            all=True, filters={"ancestor": "ollama/ollama:latest"}
-        )
+        all_containers: list[Container] = self.client.containers.list(all=True)
 
-        mapped_containers = []
+        return [
+            ContainerManager.map_container(container, status=self.resolve_status(container))
+            for container in all_containers
+            if ContainerManager.is_managed_container(container)
+        ]
 
-        for container in all_containers:
-            status = container.status
-            if status == ContainerManager.CONTAINER_STATUS[
-                "RUNNING"
-            ] and ContainerManager.is_pulling_model(container):
-                status = ContainerManager.CONTAINER_STATUS["PULLING_MODEL"]
+    def resolve_status(self, container: Container) -> str:
+        if container.status != ContainerManager.CONTAINER_STATUS["RUNNING"]:
+            return container.status
 
-            mapped_containers.append(
-                ContainerManager.map_container(container, status=status)
-            )
+        if progress_state.is_in_progress(container.name or ""):
+            return ContainerManager.CONTAINER_STATUS["PULLING_MODEL"]
 
-        return mapped_containers
+        installed = self.check_model_installed(container)
+        if installed is None:
+            return ContainerManager.CONTAINER_STATUS["STARTING"]
+
+        return ContainerManager.CONTAINER_STATUS["RUNNING" if installed else "INCOMPLETE"]
 
     def get_container(self, container_name: str) -> Container | None:
         if not self.is_connected() or self.client is None:
@@ -203,48 +277,110 @@ class ContainerManager:
             ContainerPort.objects.create(container_name=container_name, port=port)
             return port
 
-    def create_and_start_container(
-        self,
-        model_name: str,
-        parameters: str,
-    ) -> tuple[Container | None, int | None]:
-        if not self.is_connected() or self.client is None:
-            return None, None
-
-        container_name = f"{model_name}_{parameters}"
-        network_name = "chatbot-network"
-
-        if (container := self.get_container(container_name)) is not None:
-            if container.status != "running":
-                container.start()
-                container.reload()
-            container_port = ContainerManager.get_container_environment_variable(container, "port")
-            return container, int(container_port) if container_port else None
-
-        container_port = ContainerManager.allocate_port(container_name)
+    def _create_container(
+        self, container_name: str, model_name: str, parameters: str, port: int, use_gpu: bool
+    ) -> Container:
+        assert self.client is not None
 
         try:
-            container = self.client.containers.create(
+            return self.client.containers.create(
                 name=container_name,
-                image="ollama/ollama:latest",
+                image=f"{OLLAMA_IMAGE}:latest",
                 detach=True,
-                ports={"11434/tcp": container_port},
-                network=network_name,
-                device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])],
+                ports={"11434/tcp": port},
+                network="chatbot-network",
+                device_requests=[DeviceRequest(count=-1, capabilities=[["gpu"]])] if use_gpu else [],
                 hostname=container_name,
-                environment={
-                    "model": model_name,
-                    "parameters": parameters,
-                    "port": container_port,
+                # Model weights live in a named volume rather than the
+                # container's writable layer, so recreating the container
+                # (e.g. onto a newer Ollama image) doesn't re-download them.
+                volumes={
+                    ContainerManager.volume_name(container_name): {"bind": OLLAMA_DATA_PATH, "mode": "rw"}
+                },
+                labels={
+                    LABEL_MANAGED: "true",
+                    LABEL_MODEL: model_name,
+                    LABEL_PARAMETERS: parameters,
+                    LABEL_PORT: str(port),
+                    LABEL_GPU: "true" if use_gpu else "false",
                 },
             )
-        except docker.errors.DockerException as e:
-            logger.error("Error creating container: %s", e)
-            return None, None
+        except docker.errors.APIError as e:
+            logger.error("Error creating container %s: %s", container_name, e)
+            raise ContainerError(f"Couldn't create the model container: {_docker_error_text(e)}") from e
 
-        container.start()
+    def start_container(self, container: Container) -> None:
+        if container.status == ContainerManager.CONTAINER_STATUS["RUNNING"]:
+            return
+
+        try:
+            container.start()
+        except docker.errors.APIError as e:
+            logger.error("Error starting container %s: %s", container.name, e)
+            if _is_gpu_unavailable_error(e):
+                raise ContainerError(
+                    "This model was set up to use a graphics card (GPU) that isn't available now. "
+                    "Remove it on the Models page and create it again to run it on the CPU."
+                ) from e
+            raise ContainerError(f"Couldn't start the model container: {_docker_error_text(e)}") from e
+
         container.reload()
-        return container, container_port
+
+    def create_and_start_container(self, model_name: str, parameters: str) -> Container:
+        """Starts the model's container, creating it first if needed. Asks
+        for every GPU, and if the host can't provide one, recreates the
+        container CPU-only — most machines (every Mac, AMD/Intel GPUs, no
+        GPU at all) have no NVIDIA runtime, and Docker refuses to even start
+        a container that requests one there. Raises ContainerError.
+        """
+        if not self.is_connected() or self.client is None:
+            raise ContainerError("Docker isn't running. Start Docker Desktop and try again.")
+
+        container_name = ContainerManager.container_name(model_name, parameters)
+
+        if (container := self.get_container(container_name)) is not None:
+            self.start_container(container)
+            return container
+
+        port = ContainerManager.allocate_port(container_name)
+        use_gpu = ContainerManager._gpu_supported is not False
+        container = self._create_container(container_name, model_name, parameters, port, use_gpu)
+
+        try:
+            container.start()
+        except docker.errors.APIError as e:
+            if not (use_gpu and _is_gpu_unavailable_error(e)):
+                logger.error("Error starting container %s: %s", container_name, e)
+                raise ContainerError(f"Couldn't start the model container: {_docker_error_text(e)}") from e
+
+            logger.warning("No usable GPU (%s) — recreating %s CPU-only", _docker_error_text(e), container_name)
+            ContainerManager._gpu_supported = False
+            container.remove(force=True)
+            container = self._create_container(container_name, model_name, parameters, port, use_gpu=False)
+            self.start_container(container)
+            return container
+
+        if use_gpu:
+            ContainerManager._gpu_supported = True
+        container.reload()
+        return container
+
+    def gpu_status(self) -> bool | None:
+        """True/False once a container start has shown whether GPUs work on
+        this host, else whatever existing containers were created with, else
+        None (unknown — nothing has been started yet)."""
+        if ContainerManager._gpu_supported is not None:
+            return ContainerManager._gpu_supported
+
+        if not self.is_connected() or self.client is None:
+            return None
+
+        for container in self.client.containers.list(all=True, filters={"label": f"{LABEL_MANAGED}=true"}):
+            gpu_label = ContainerManager._labels(container).get(LABEL_GPU)
+            if gpu_label in ("true", "false"):
+                return gpu_label == "true"
+
+        return None
 
     def wait_for_ollama_ready(self, base_url: str, timeout: int = 60) -> bool:
         url = f"{base_url}/api/version"
@@ -260,6 +396,45 @@ class ContainerManager:
             time.sleep(1)
 
         return False
+
+    @staticmethod
+    def is_model_installed(base_url: str, model: str, parameters: str) -> bool | None:
+        """Whether Ollama at `base_url` holds `model:parameters`, or None if
+        Ollama can't be asked right now (still booting, or unreachable)."""
+        try:
+            response = requests.get(f"{base_url}/api/tags", timeout=2)
+            response.raise_for_status()
+            listed = response.json().get("models") or []
+        except (requests.exceptions.RequestException, ValueError, AttributeError):
+            return None
+
+        wanted = f"{model}:{parameters}"
+        return any(wanted in (entry.get("name"), entry.get("model")) for entry in listed)
+
+    def check_model_installed(self, container: Container) -> bool | None:
+        if container.id in ContainerManager._installed_ids:
+            return True
+
+        base_url = self.base_url_for(container)
+        model = ContainerManager.get_container_metadata(container, "model")
+        parameters = ContainerManager.get_container_metadata(container, "parameters")
+        if base_url is None or model is None or parameters is None:
+            return None
+
+        installed = ContainerManager.is_model_installed(base_url, model, parameters)
+        if installed:
+            ContainerManager.mark_installed(container)
+        return installed
+
+    @staticmethod
+    def mark_installed(container: Container) -> None:
+        with ContainerManager._installed_lock:
+            if container.id:
+                ContainerManager._installed_ids.add(container.id)
+
+    @staticmethod
+    def is_marked_installed(container: Container) -> bool:
+        return container.id in ContainerManager._installed_ids
 
     def pull_model_with_progress(
         self,
@@ -382,99 +557,75 @@ class ContainerManager:
                 container.remove()
             except docker.errors.APIError as e:
                 logger.warning("Error removing container %s: %s", container_name, e)
+                return
 
-    def is_model_pulling(self, model: str, parameters: str) -> bool:
-        container_name = f"{model}_{parameters}"
-        container = self.get_container(container_name)
-        if container is None or container.status != "running":
-            return False
-        return ContainerManager.is_pulling_model(container)
+            with ContainerManager._installed_lock:
+                ContainerManager._installed_ids.discard(container.id or "")
 
-    def get_ollama_base_url(self, model: str, parameters: str) -> str | None:
-        """The URL this server should use to reach the model's container.
+        # `remove(v=True)` only deletes anonymous volumes — the named one
+        # holding the weights has to go explicitly, or "Remove" frees nothing.
+        try:
+            self.client.volumes.get(ContainerManager.volume_name(container_name)).remove()
+        except docker.errors.NotFound:
+            pass
+        except docker.errors.APIError as e:
+            logger.warning("Error removing volume for %s: %s", container_name, e)
 
-        In Docker mode this server is itself a container on the same
+    def base_url_for(self, container: Container) -> str | None:
+        """In Docker mode this server is itself a container on the same
         `chatbot-network` bridge, so it addresses the target directly by
         container name over Docker's internal DNS — no host port needed,
         and no `host.docker.internal`, which isn't resolvable on Linux
         Docker Engine without an `extra_hosts` entry docker-compose.yaml
-        doesn't set (this breaks the whole app on Linux today).
+        doesn't set.
 
         Outside Docker (`python manage.py runserver` on the host, container
         management still going through the Docker socket), there's no
         shared network to piggyback on, so it has to go through the
-        allocated host-published port instead.
+        allocated host-published port instead. An IP literal, not
+        "localhost" — see the DATABASES note in settings.py.
         """
-        container_name = f"{model}_{parameters}"
-        container = self.get_container(container_name)
+        if os.getenv("DOCKER", "false") == "true":
+            return f"http://{container.name}:11434"
+
+        host_port = ContainerManager.get_container_metadata(container, "port")
+        if host_port is None:
+            return None
+        return f"http://127.0.0.1:{host_port}"
+
+    def get_ollama_base_url(self, model: str, parameters: str) -> str | None:
+        container = self.get_container(ContainerManager.container_name(model, parameters))
         if container is None or container.status != "running":
             return None
 
-        if os.getenv("DOCKER", "false") == "true":
-            return f"http://{container_name}:11434"
-
-        host_port = ContainerManager.get_container_environment_variable(container, "port")
-        if host_port is None:
-            return None
-        return f"http://localhost:{host_port}"
+        return self.base_url_for(container)
 
     @staticmethod
-    def map_container(
-        container: Container,
-        name: str | None = None,
-        status: str | None = None,
-        port: str | None = None,
-        environment: dict[str, str | None] | None = None,
-    ) -> dict[str, str | None]:
+    def map_container(container: Container, status: str | None = None) -> dict[str, typing.Any]:
         return {
-            "name": container.name or "No name" if name is None else name,
+            "name": container.name or "No name",
             "status": container.status if status is None else status,
-            "port": (
-                ContainerManager.get_container_environment_variable(container, "port")
-                if port is None
-                else port
-            ),
-            "environment": (
-                {
-                    "model": ContainerManager.get_container_environment_variable(
-                        container, "model"
-                    ),
-                    "parameters": ContainerManager.get_container_environment_variable(
-                        container, "parameters"
-                    ),
-                }
-                if environment is None
-                else environment
-            ),  # type: ignore
+            "port": ContainerManager.get_container_metadata(container, "port"),
+            "environment": {
+                "model": ContainerManager.get_container_metadata(container, "model"),
+                "parameters": ContainerManager.get_container_metadata(container, "parameters"),
+            },
         }
 
     @staticmethod
-    def is_pulling_model(container: Container) -> bool:
-        try:
-            processes = container.top().get("Processes", [])  # type: ignore
-
-            return any(
-                "ollama pull" in process
-                for process_list in processes
-                for process in process_list
-            )
-
-        except (KeyError, IndexError):
-            return False
-        except docker.errors.APIError:
-            # Container stopped between the caller's status check and this
-            # call — not pulling if it's not even running.
-            return False
+    def _labels(container: Container) -> dict[str, str]:
+        return container.attrs.get("Config", {}).get("Labels") or {}
 
     @staticmethod
-    def get_container_environment_variable(
-        container: Container, env_variable: str
-    ) -> str | None:
-        env_list = container.attrs.get("Config", {}).get("Env") or []
+    def get_container_metadata(container: Container, key: str) -> str | None:
+        """`key` is "model", "parameters" or "port" — read from our labels,
+        falling back to the env vars containers created before labels used."""
+        if (label := _METADATA_LABELS.get(key)) and (value := ContainerManager._labels(container).get(label)):
+            return value
 
-        for env in env_list:
-            parts = env.split("=", 1)
-            if len(parts) == 2 and parts[0] == env_variable:
-                return parts[1]
+        for env in container.attrs.get("Config", {}).get("Env") or []:
+            name, sep, value = env.partition("=")
+            if sep and name == key:
+                return value
 
         return None

@@ -7,8 +7,8 @@ from rest_framework.views import APIView
 
 from django_app.models import AIModel, AIModelVersion
 
-from . import hardware
-from .ContainerManager import ContainerManager
+from . import hardware, install
+from .ContainerManager import ContainerError, ContainerManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ class Hardware(APIView):
             {
                 "ram_bytes": hardware.get_host_ram_bytes(docker_client),
                 "vram_bytes": hardware.get_gpu_vram_bytes(),
+                "gpu_available": docker_client.gpu_status(),
             },
             status=status.HTTP_200_OK,
         )
@@ -158,8 +159,8 @@ class Container(APIView):
         )
 
     def post(self, request, model) -> Response:
-        # Returns 200 synchronously when starting an existing container.
-        # Returns 202 and starts a background worker when creating a new container.
+        # 200 when the model is already confirmed running; otherwise 202 and
+        # progress arrives over the container socket (see container/install.py).
         query_model_params = request.query_params.get("parameters", None)
         if query_model_params is None:
             return Response(
@@ -193,145 +194,29 @@ class Container(APIView):
                 {"error": "Invalid model version"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        container_name = f"{model}_{query_model_params}"
-
-        # If container already exists, start it synchronously (model is already pulled).
+        container_name = ContainerManager.container_name(model, query_model_params)
         existing = docker_client.get_container(container_name)
+
         if existing is not None:
-            if existing.status != "running":
-                existing.start()
-                existing.reload()
-            return Response(
-                {
-                    "status": "Container is running",
-                    "container": ContainerManager.map_container(existing),
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        # New container: kick off async worker, return 202 immediately.
-        model_name = ai_model.model
-        parameters = ai_model_version.parameters
-
-        def _run_worker() -> None:
-            from django.db import close_old_connections
-
-            from django_app import progress_state
-
-            close_old_connections()
-
-            def _broadcast_progress(type_: str, percent: int, detail: str) -> None:
-                progress_state.set_progress(container_name, phase=type_, percent=percent, detail=detail)
-                progress_state.broadcast(
-                    type_,
-                    {
-                        "type": type_,
-                        "container": container_name,
-                        "phase": type_,
-                        "percent": percent,
-                        "detail": detail,
-                    },
-                    key=container_name,
-                )
-
-            def _broadcast_final() -> None:
-                try:
-                    dc = ContainerManager()
-                    containers = dc.get_available_containers()
-                    snap = progress_state.get_snapshot()
-                    progress_state.broadcast(
-                        "snapshot",
-                        {"type": "snapshot", "containers": containers, **snap},
-                        key="final",
-                        force=True,
-                    )
-                except Exception as e:
-                    logger.debug("Final broadcast error: %s", e)
-
             try:
-                dc = ContainerManager()
-                if not dc.is_connected():
-                    dc.connect_to_docker()
+                docker_client.start_container(existing)
+            except ContainerError as e:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-                # Step 1: ensure base image with progress
-                _broadcast_progress("image_pull_progress", 0, "Checking base image…")
-
-                def image_cb(percent: int, detail: str) -> None:
-                    _broadcast_progress("image_pull_progress", percent, detail)
-
-                if not dc.ensure_ollama_image(progress_cb=image_cb):
-                    progress_state.clear_progress(container_name)
-                    progress_state.broadcast(
-                        "container_update",
-                        {"type": "container_update", "container": container_name, "error": "Failed to download base image"},
-                        key=container_name,
-                        force=True,
-                    )
-                    _broadcast_final()
-                    return
-
-                # Step 2: create + start container
-                _broadcast_progress("image_pull_progress", 100, "Starting container…")
-                container, _host_port = dc.create_and_start_container(model_name, parameters)
-                if container is None:
-                    progress_state.clear_progress(container_name)
-                    progress_state.broadcast(
-                        "container_update",
-                        {"type": "container_update", "container": container_name, "error": "Failed to create container"},
-                        key=container_name,
-                        force=True,
-                    )
-                    _broadcast_final()
-                    return
-
-                base_url = dc.get_ollama_base_url(model_name, parameters)
-                if base_url is None:
-                    progress_state.clear_progress(container_name)
-                    progress_state.broadcast(
-                        "container_update",
-                        {"type": "container_update", "container": container_name, "error": "Container started but could not be reached"},
-                        key=container_name,
-                        force=True,
-                    )
-                    _broadcast_final()
-                    return
-
-                # Step 3: wait for Ollama to be ready
-                _broadcast_progress("model_pull_progress", 0, "Waiting for Ollama to start…")
-                if not dc.wait_for_ollama_ready(base_url):
-                    logger.warning("Ollama did not become ready at %s", base_url)
-
-                # Step 4: pull model with progress
-                def model_cb(percent: int, detail: str) -> None:
-                    _broadcast_progress("model_pull_progress", percent, detail)
-
-                pulled, pull_error = dc.pull_model_with_progress(model_name, parameters, base_url, progress_cb=model_cb)
-                if not pulled:
-                    progress_state.broadcast(
-                        "container_update",
-                        {"type": "container_update", "container": container_name, "error": pull_error or "Model pull failed"},
-                        key=container_name,
-                        force=True,
-                    )
-
-            except Exception as e:
-                logger.error("Container run worker error for %s: %s", container_name, e)
-                progress_state.broadcast(
-                    "container_update",
-                    {"type": "container_update", "container": container_name, "error": str(e)},
-                    key=container_name,
-                    force=True,
+            # Already confirmed to hold its model — nothing left to do. Any
+            # other case (first start since the backend restarted, or a pull
+            # that never finished) goes through the install worker, which
+            # just checks /api/tags when the model is there and resumes the
+            # download when it isn't.
+            if ContainerManager.is_marked_installed(existing):
+                return Response(
+                    {"status": "Container is running", "container": ContainerManager.map_container(existing)},
+                    status=status.HTTP_200_OK,
                 )
-            finally:
-                progress_state.clear_progress(container_name)
-                _broadcast_final()
 
-        threading.Thread(target=_run_worker, daemon=True, name=f"container-{container_name}").start()
+        install.start_install(ai_model.model, ai_model_version.parameters)
 
-        return Response(
-            {"status": "Container creation started"},
-            status=status.HTTP_202_ACCEPTED,
-        )
+        return Response({"status": "Model setup started"}, status=status.HTTP_202_ACCEPTED)
 
     def delete(self, request, model) -> Response:
         docker_client = ContainerManager()
@@ -351,7 +236,7 @@ class Container(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-        container_name = f"{model}_{query_model_params}"
+        container_name = ContainerManager.container_name(model, query_model_params)
 
         if query_method == "stop":
             docker_client.stop_container(container_name)

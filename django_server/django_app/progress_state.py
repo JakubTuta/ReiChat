@@ -29,6 +29,21 @@ def set_progress(name: str, **kwargs) -> None:
         progress_registry[name].update(kwargs)
 
 
+def try_claim(name: str, detail: str) -> bool:
+    """Atomically mark `name` as having an install in flight. False if one
+    already is, so two clicks (or two tabs) can't run two pulls at once."""
+    with _lock:
+        if name in progress_registry:
+            return False
+        progress_registry[name] = {"phase": "model_pull_progress", "percent": 0, "detail": detail}
+        return True
+
+
+def is_in_progress(name: str) -> bool:
+    with _lock:
+        return name in progress_registry
+
+
 def clear_progress(name: str) -> None:
     with _lock:
         progress_registry.pop(name, None)

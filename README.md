@@ -81,9 +81,11 @@ almost anything and are a good way to try things out.
 ## GPU support (optional, makes models noticeably faster)
 
 - **Windows** — [NVIDIA GPUs with WSL2](https://docs.docker.com/desktop/features/gpu/)
-- **Linux / macOS** — [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation)
+- **Linux** — [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#installation)
 
-No GPU? Everything still works — models just generate more slowly on CPU.
+No NVIDIA GPU (including every Mac)? Everything still works — the app notices the GPU isn't
+available, runs models on the CPU instead, and says so on the Models page. Models just generate
+more slowly.
 
 ---
 
@@ -94,7 +96,9 @@ the banner; it also rechecks automatically.
 
 **A model won't pull or install** — a bad or unpullable tag fails visibly with the real error
 message instead of silently doing nothing. Check the message shown in the UI — it names the actual
-problem (network, disk space, or an invalid tag).
+problem (network, disk space, or an invalid tag). If a download was interrupted (network drop,
+restart), the model shows **download didn't finish** — press **Resume download** and it continues
+from where it stopped.
 
 **Refreshing the model list looks like it did nothing** — that's by design: refresh only adds and
 updates models, it never deletes your chat history or removes an installed model from the list.

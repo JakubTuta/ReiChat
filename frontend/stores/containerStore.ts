@@ -1,7 +1,7 @@
 import type { ContainerSocketMessage, ContainerSocketWrapper, PullProgressInfo, ScrapeProgressInfo } from '~/constants/containerSocket'
 import { getContainerSocket } from '~/constants/containerSocket'
 
-export type ContainerStatus = 'running' | 'exited' | 'paused' | 'restarting' | 'pulling_model'
+export type ContainerStatus = 'running' | 'exited' | 'paused' | 'restarting' | 'pulling_model' | 'starting' | 'incomplete'
 
 export interface Container {
   name: string
@@ -39,7 +39,7 @@ export const useContainerStore = defineStore('container', () => {
   }
 
   const shouldPoll = () => !socketConnected
-    && containers.value.some(c => c.status === 'pulling_model' || c.status === 'restarting')
+    && containers.value.some(c => ['pulling_model', 'restarting', 'starting'].includes(c.status))
 
   function stopPolling() {
     if (pollTimer !== null) {
@@ -197,9 +197,10 @@ export const useContainerStore = defineStore('container', () => {
     try {
       const response = await api.value.post(url, {})
 
-      // 200: existing container started synchronously
-      // 202: new container creation started, progress comes via socket
-      if (response.status === 200) {
+      // 200: model confirmed running. 202: setup/resume started in the
+      // background — progress comes via the socket where one is open, and
+      // the refresh below starts polling (pulling/starting) where it isn't.
+      if (response.status === 200 || response.status === 202) {
         await getUserContainers()
       }
     }

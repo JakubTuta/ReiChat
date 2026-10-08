@@ -16,7 +16,7 @@ from langchain_ollama import ChatOllama
 
 from container.ContainerManager import ContainerManager
 
-from . import models
+from . import models, progress_state
 from .mcp_integration import client as mcp_client
 from .tools.builtin import BUILTIN_TOOLS, BUILTIN_TOOLS_BY_NAME
 
@@ -437,20 +437,33 @@ def _build_structured_output_model(
 
 
 def get_ollama_url(model_name: str, parameters: str) -> tuple[str, str] | None:
+    """(base_url, "model:tag") for a running container that holds its model,
+    None if the container isn't running. Raises ModelUnavailableError for the
+    "running but not usable yet" cases, each with its own next step."""
     container_manager = ContainerManager()
+    container_name = ContainerManager.container_name(model_name, parameters)
 
-    if container_manager.is_model_pulling(model_name, parameters):
+    if progress_state.is_in_progress(container_name):
         raise ModelUnavailableError(
-            "The model is still being pulled. Wait for it to finish on the Models page, then try again."
+            "This model is still downloading. Wait for it to finish on the Models page, then try again."
         )
 
-    base_url = container_manager.get_ollama_base_url(model_name, parameters)
+    container = container_manager.get_container(container_name)
+    if container is None or container.status != "running":
+        return None
+
+    base_url = container_manager.base_url_for(container)
     if base_url is None:
         return None
 
-    full_model_string = f"{model_name}:{parameters}"
+    # None (Ollama not answering yet) falls through: the request itself then
+    # fails with the "may still be starting up" message.
+    if container_manager.check_model_installed(container) is False:
+        raise ModelUnavailableError(
+            "This model's download didn't finish. Open the Models page and press 'Resume download'."
+        )
 
-    return base_url, full_model_string
+    return base_url, f"{model_name}:{parameters}"
 
 
 def deserialize_messages(messages) -> list[dict[str, str]]:

@@ -5,7 +5,7 @@ export const useHardwareStore = defineStore('hardware', () => {
   const snackbarStore = useSnackbarStore()
   const { api } = storeToRefs(apiStore)
 
-  const hardware = ref<IHardwareInfo>({ ram_bytes: null, vram_bytes: null })
+  const hardware = ref<IHardwareInfo>({ ram_bytes: null, vram_bytes: null, gpu_available: null })
   const diskUsage = ref<IDiskUsage>({ total_bytes: 0, models: [] })
   const loading = ref(false)
 
