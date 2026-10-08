@@ -306,7 +306,7 @@ class Documents(APIView):
         raw = uploaded_file.read()
 
         try:
-            text = rag_extract.extract_text(uploaded_file.name, raw)
+            text, page_starts = rag_extract.extract_document(uploaded_file.name, raw)
         except rag_extract.UnsupportedFileTypeError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -321,7 +321,7 @@ class Documents(APIView):
         # model and would block the request for a while on anything but a
         # tiny file — same background-worker pattern as container creation
         # and catalog refresh (see container/install.py / AIModels.put).
-        rag_ingest.start_ingest(document.id, text)
+        rag_ingest.start_ingest(document.id, text, page_starts)
 
         return Response(serializers.DocumentSerializer(document).data, status=status.HTTP_202_ACCEPTED)
 
@@ -337,6 +337,32 @@ class Documents(APIView):
         document.delete()
 
         return Response({"status": "Document deleted"}, status=status.HTTP_200_OK)
+
+
+class DocumentChunk(APIView):
+    """The passage behind a citation, so the user can check what the model
+    was actually shown."""
+
+    @decorators.required_query_params(["document_id", "chunk_index"])
+    def get(self, request: Request) -> Response:
+        chunk = (
+            models.DocumentChunk.objects.select_related("document")
+            .filter(
+                document_id=request.query_params["document_id"],
+                chunk_index=request.query_params["chunk_index"],
+            )
+            .first()
+        )
+        if chunk is None:
+            return Response(
+                {"error": "That passage no longer exists — the file may have been removed."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(
+            {"filename": chunk.document.filename, "page": chunk.page, "content": chunk.content},
+            status=status.HTTP_200_OK,
+        )
 
 
 class MCPServers(APIView):

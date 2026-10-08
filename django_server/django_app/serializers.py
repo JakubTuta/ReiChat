@@ -62,9 +62,9 @@ class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Document
         fields: list[str] = [
-            "id", "collection", "filename", "status", "error_message", "chunk_count", "uploaded_at",
+            "id", "collection", "filename", "status", "error_message", "chunk_count", "progress", "uploaded_at",
         ]
-        read_only_fields: list[str] = ["status", "error_message", "chunk_count"]
+        read_only_fields: list[str] = ["status", "error_message", "chunk_count", "progress"]
 
 
 class ChatHistorySerializer(serializers.ModelSerializer):

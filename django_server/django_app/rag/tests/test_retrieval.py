@@ -160,3 +160,47 @@ def test_retrieve_context_for_chat_no_active_collections_returns_nothing():
 
     assert context == ""
     assert citations == []
+
+
+def test_keyword_search_finds_exact_codes_that_embeddings_miss(monkeypatch, collection):
+    _make_chunk(collection, "general product overview", [1.0, 0.0], filename="overview.txt")
+    _make_chunk(collection, "error ZX4471 means the fan is blocked", [0.0, 1.0], filename="codes.txt")
+    _stub_embeddings(monkeypatch, [1.0, 0.0])
+
+    _, citations, _ = retrieval.build_rag_context([collection], "ZX4471")
+
+    assert "codes.txt" in {c["filename"] for c in citations}
+
+
+def test_weak_vector_only_matches_are_dropped_when_a_strong_one_exists(monkeypatch, collection):
+    _make_chunk(collection, "about cats", [1.0, 0.0], filename="cats.txt")
+    _make_chunk(collection, "about dogs", [0.0, 1.0], filename="dogs.txt")
+    _stub_embeddings(monkeypatch, [1.0, 0.0])
+
+    _, citations, _ = retrieval.build_rag_context([collection], "felines")
+
+    assert [c["filename"] for c in citations] == ["cats.txt"]
+
+
+def test_citations_and_context_carry_the_page(monkeypatch, collection):
+    document = models.Document.objects.create(
+        collection=collection, filename="manual.pdf", status=models.Document.STATUS_READY
+    )
+    models.DocumentChunk.objects.create(
+        document=document, chunk_index=0, content="reset instructions", char_start=0, page=7, embedding=[1.0, 0.0]
+    )
+    _stub_embeddings(monkeypatch, [1.0, 0.0])
+
+    context, citations, _ = retrieval.build_rag_context([collection], "reset")
+
+    assert citations[0]["page"] == 7
+    assert "[manual.pdf, page 7]" in context
+
+
+def test_short_follow_up_questions_are_searched_together_with_the_previous_one():
+    assert retrieval.build_search_query("and the second?", "What are the two warranty options?") == (
+        "What are the two warranty options?\nand the second?"
+    )
+    long_question = "Explain in detail how the warranty registration process works for business customers"
+    assert retrieval.build_search_query(long_question, "previous") == long_question
+    assert retrieval.build_search_query("short", None) == "short"

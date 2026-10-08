@@ -1063,3 +1063,25 @@ def test_get_chat_history_query_count_does_not_grow_with_chat_length(client, cha
 
     assert response.status_code == 200
     assert [m["content"] for m in response.json()] == [f"m{i}" for i in range(30)]
+
+
+def test_document_chunk_returns_the_cited_passage(client, embedding_model):
+    collection = models.DocumentCollection.objects.create(
+        name="Docs", embedding_model=embedding_model, embedding_parameters="latest"
+    )
+    document = models.Document.objects.create(collection=collection, filename="manual.pdf", status="ready")
+    models.DocumentChunk.objects.create(
+        document=document, chunk_index=3, content="Hold reset for 10 seconds.", char_start=0, page=4,
+        embedding=[1.0, 0.0],
+    )
+
+    response = client.get(f"/documents/chunk/?document_id={document.id}&chunk_index=3")
+
+    assert response.status_code == 200
+    assert response.json() == {"filename": "manual.pdf", "page": 4, "content": "Hold reset for 10 seconds."}
+
+
+def test_document_chunk_missing_says_so(client):
+    response = client.get("/documents/chunk/?document_id=999999&chunk_index=0")
+
+    assert response.status_code == 404

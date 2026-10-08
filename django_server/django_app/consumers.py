@@ -386,7 +386,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # chat's retrieval can't stall every other concurrent chat.
             rag_context, citations, rag_warnings = await sync_to_async(
                 rag_retrieval.retrieve_context_for_chat, thread_sensitive=False
-            )(chat_history, user_prompt)
+            )(
+                chat_history,
+                user_prompt,
+                next((m["content"] for m in reversed(history_messages) if m.get("role") == "user"), None),
+            )
             # Sent before the answer starts, so the user knows up front that
             # it's being written without some of their documents.
             for warning in rag_warnings:

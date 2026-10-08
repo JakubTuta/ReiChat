@@ -438,7 +438,7 @@ async def test_receive_surfaces_model_unavailable_as_readable_error(chat, monkey
 async def test_failure_during_generation_setup_still_sends_an_error_frame(chat, monkeypatch):
     from django_app.rag import retrieval
 
-    def _broken_retrieval(chat_history, query):
+    def _broken_retrieval(chat_history, query, previous_question=None):
         raise RuntimeError("pgvector exploded")
 
     monkeypatch.setattr(retrieval, "retrieve_context_for_chat", _broken_retrieval)
@@ -461,7 +461,9 @@ async def test_rag_warnings_are_sent_as_notices_before_the_answer(chat, monkeypa
     monkeypatch.setattr(
         retrieval,
         "retrieve_context_for_chat",
-        lambda chat_history, query: retrieval.RetrievalResult("", [], ["Your documents weren't searched."]),
+        lambda chat_history, query, previous_question=None: retrieval.RetrievalResult(
+            "", [], ["Your documents weren't searched."]
+        ),
     )
 
     async def _fake_astream(*args, **kwargs):

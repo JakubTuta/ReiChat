@@ -103,7 +103,9 @@ def test_mark_interrupted_fails_orphaned_documents_but_not_live_ones(collection,
 
 def test_start_ingest_tracks_the_document_until_the_thread_finishes(monkeypatch):
     seen_during: list[bool] = []
-    monkeypatch.setattr(ingest, "ingest_document", lambda doc_id, text: seen_during.append(doc_id in ingest._active_ids))
+    monkeypatch.setattr(
+        ingest, "ingest_document", lambda doc_id, text, pages: seen_during.append(doc_id in ingest._active_ids)
+    )
 
     class _InlineThread:
         def __init__(self, target, args, **kwargs):
@@ -118,3 +120,17 @@ def test_start_ingest_tracks_the_document_until_the_thread_finishes(monkeypatch)
 
     assert seen_during == [True]
     assert 4242 not in ingest._active_ids
+
+
+def test_ingest_maps_chunks_to_pdf_pages_and_reports_progress(monkeypatch, document):
+    _stub_embeddings(monkeypatch)
+    page_one = "alpha " * 300
+    text = page_one + "\n\n" + "beta " * 300
+
+    ingest.ingest_document(document.id, text, page_starts=[0, len(page_one) + 2])
+
+    document.refresh_from_db()
+    pages = list(document.chunks.order_by("chunk_index").values_list("page", flat=True))
+    assert pages[0] == 1
+    assert pages[-1] == 2
+    assert document.progress == 100

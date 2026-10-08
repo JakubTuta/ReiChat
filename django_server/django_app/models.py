@@ -233,6 +233,9 @@ class Document(models.Model):
     status = models.TextField(choices=STATUS_CHOICES, default=STATUS_PENDING)
     error_message = models.TextField(default="")
     chunk_count = models.IntegerField(default=0)
+    # Percent of chunks embedded so far, while processing — a big PDF on a
+    # CPU-only machine can take minutes.
+    progress = models.IntegerField(default=0)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
@@ -244,6 +247,8 @@ class DocumentChunk(models.Model):
     chunk_index = models.IntegerField()
     content = models.TextField()
     char_start = models.IntegerField()
+    # 1-based page the chunk starts on, for PDFs; null for formats without pages.
+    page = models.IntegerField(null=True, blank=True)
     # No fixed `dimensions=` — different collections may use different
     # embedding models with different vector sizes. Safe because every
     # CosineDistance query is scoped to chunks from one collection (see

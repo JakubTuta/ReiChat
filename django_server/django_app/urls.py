@@ -18,6 +18,7 @@ urlpatterns: list[URLPattern] = [
     path("search/<str:model>", views.Search.as_view(), name="search"),
     path("collections/", views.Collections.as_view(), name="collections"),
     path("documents/", views.Documents.as_view(), name="documents"),
+    path("documents/chunk/", views.DocumentChunk.as_view(), name="document_chunk"),
     path("mcp-servers/", views.MCPServers.as_view(), name="mcp_servers"),
     path("mcp-servers/test/", views.MCPServerTest.as_view(), name="mcp_server_test"),
 ]

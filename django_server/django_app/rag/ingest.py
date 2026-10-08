@@ -1,3 +1,4 @@
+import bisect
 import logging
 import threading
 
@@ -19,21 +20,26 @@ _active_ids: set[int] = set()
 _active_lock = threading.Lock()
 
 
-def start_ingest(document_id: int, text: str) -> None:
+# Embedding a whole long document in one request gives no progress and can
+# run into request timeouts; batches give both a heartbeat and a percentage.
+EMBED_BATCH_SIZE = 32
+
+
+def start_ingest(document_id: int, text: str, page_starts: list[int] | None = None) -> None:
     with _active_lock:
         _active_ids.add(document_id)
 
     threading.Thread(
         target=_run_ingest,
-        args=(document_id, text),
+        args=(document_id, text, page_starts),
         daemon=True,
         name=f"ingest-document-{document_id}",
     ).start()
 
 
-def _run_ingest(document_id: int, text: str) -> None:
+def _run_ingest(document_id: int, text: str, page_starts: list[int] | None) -> None:
     try:
-        ingest_document(document_id, text)
+        ingest_document(document_id, text, page_starts)
     finally:
         with _active_lock:
             _active_ids.discard(document_id)
@@ -53,7 +59,13 @@ def mark_interrupted_documents(collection_id: int | str) -> int:
     )
 
 
-def ingest_document(document_id: int, text: str) -> None:
+def _page_for(char_start: int, page_starts: list[int] | None) -> int | None:
+    if not page_starts:
+        return None
+    return bisect.bisect_right(page_starts, char_start)
+
+
+def ingest_document(document_id: int, text: str, page_starts: list[int] | None = None) -> None:
     """Chunks, embeds, and saves a document's content. Runs in a background
     thread (see views.Documents.post) — real embedding calls are too slow to
     do inline in the upload request. Only the id and already-extracted text
@@ -82,7 +94,12 @@ def ingest_document(document_id: int, text: str) -> None:
         client = embeddings.get_embeddings_client(
             document.collection.embedding_model.model, document.collection.embedding_parameters
         )
-        vectors = client.embed_documents([c.content for c in chunks])
+        vectors: list[list[float]] = []
+        for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+            batch = chunks[start:start + EMBED_BATCH_SIZE]
+            vectors.extend(client.embed_documents([c.content for c in batch]))
+            document.progress = int(100 * len(vectors) / len(chunks))
+            document.save(update_fields=["progress"])
 
         with transaction.atomic():
             models.DocumentChunk.objects.bulk_create(
@@ -92,6 +109,7 @@ def ingest_document(document_id: int, text: str) -> None:
                         chunk_index=i,
                         content=chunk.content,
                         char_start=chunk.char_start,
+                        page=_page_for(chunk.char_start, page_starts),
                         embedding=vector,
                     )
                     for i, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
