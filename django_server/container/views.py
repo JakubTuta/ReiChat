@@ -57,7 +57,7 @@ class Hardware(APIView):
         return Response(
             {
                 "ram_bytes": hardware.get_host_ram_bytes(docker_client),
-                "vram_bytes": hardware.get_gpu_vram_bytes(),
+                "vram_bytes": hardware.detect_vram_bytes(docker_client),
                 "gpu_available": docker_client.gpu_status(),
             },
             status=status.HTTP_200_OK,

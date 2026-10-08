@@ -31,7 +31,7 @@ def connected_docker():
 
 def test_get_hardware_returns_ram_and_vram(client, connected_docker, monkeypatch):
     monkeypatch.setattr("container.views.hardware.get_host_ram_bytes", lambda cm: 16_000_000_000)
-    monkeypatch.setattr("container.views.hardware.get_gpu_vram_bytes", lambda: 8_000_000_000)
+    monkeypatch.setattr("container.views.hardware.detect_vram_bytes", lambda cm: 8_000_000_000)
     monkeypatch.setattr(ContainerManager, "gpu_status", lambda self: False)
 
     response = client.get("/docker/hardware/")
@@ -42,7 +42,7 @@ def test_get_hardware_returns_ram_and_vram(client, connected_docker, monkeypatch
 
 def test_get_hardware_missing_vram_is_null(client, connected_docker, monkeypatch):
     monkeypatch.setattr("container.views.hardware.get_host_ram_bytes", lambda cm: 16_000_000_000)
-    monkeypatch.setattr("container.views.hardware.get_gpu_vram_bytes", lambda: None)
+    monkeypatch.setattr("container.views.hardware.detect_vram_bytes", lambda cm: None)
 
     response = client.get("/docker/hardware/")
 

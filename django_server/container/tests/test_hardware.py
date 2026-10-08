@@ -79,3 +79,33 @@ def test_get_gpu_vram_bytes_returns_none_on_timeout(monkeypatch, timeout_exc):
     monkeypatch.setattr(hardware.subprocess, "run", _raise)
 
     assert hardware.get_gpu_vram_bytes() is None
+
+
+def test_vram_via_ollama_container_runs_nvidia_smi_inside_a_gpu_container():
+    gpu_container = MagicMock()
+    gpu_container.exec_run.return_value = (0, b"12288\n")
+    fake_client = MagicMock()
+    fake_client.containers.list.return_value = [gpu_container]
+
+    assert hardware.get_gpu_vram_bytes_via_ollama_container(MagicMock(client=fake_client)) == 12288 * 1024 * 1024
+    assert "reichat.gpu=true" in fake_client.containers.list.call_args.kwargs["filters"]["label"]
+
+
+def test_vram_via_ollama_container_is_none_without_a_gpu_container():
+    fake_client = MagicMock()
+    fake_client.containers.list.return_value = []
+
+    assert hardware.get_gpu_vram_bytes_via_ollama_container(MagicMock(client=fake_client)) is None
+
+
+def test_detect_vram_falls_back_to_the_container_and_caches(monkeypatch):
+    monkeypatch.setattr(hardware, "_cached_vram_bytes", None)
+    monkeypatch.setattr(hardware, "get_gpu_vram_bytes", lambda: None)
+    calls = []
+    monkeypatch.setattr(
+        hardware, "get_gpu_vram_bytes_via_ollama_container", lambda cm: calls.append(cm) or 4096
+    )
+
+    assert hardware.detect_vram_bytes(MagicMock()) == 4096
+    assert hardware.detect_vram_bytes(MagicMock()) == 4096
+    assert len(calls) == 1
