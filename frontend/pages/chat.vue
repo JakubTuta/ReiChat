@@ -399,6 +399,7 @@ function handleSearchSelect(chatId: string) {
         :reset="forceReset"
         :selected-chat-id="selectedChatId"
         @soft-reset="softReset"
+        @select-chat="(id: string) => selectedChatId = id"
       />
     </template>
   </div>

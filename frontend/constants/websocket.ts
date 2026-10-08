@@ -13,9 +13,19 @@ export interface GenerationStats {
   prompt_tokens?: number
   completion_tokens?: number
   tokens_per_second?: number
-  // Only present when the chat has an explicit num_ctx override set.
-  context_used?: number
-  context_limit?: number
+}
+
+// How full the model's memory (context window) was for one reply — see
+// django_app/context_window.py. `used` and `limit` are in tokens.
+export interface ContextReport {
+  limit: number
+  used: number
+  model_max: number | null
+  preset: string | null
+  // How many of the oldest messages didn't fit and weren't sent.
+  dropped: number
+  // Older messages were replaced by a running summary.
+  summarized: boolean
 }
 
 export interface Citation {
@@ -41,6 +51,8 @@ export interface WebsocketResponse {
   // Only present on the final `done: true` frame, and only when Ollama
   // actually reported it (never on partial/cancelled generations).
   stats?: GenerationStats
+  // On every final frame of a reply that got as far as generating.
+  context?: ContextReport
   // Only present when the chat has active document collections and at
   // least one chunk was relevant enough to include — see rag/retrieval.py.
   citations?: Citation[]

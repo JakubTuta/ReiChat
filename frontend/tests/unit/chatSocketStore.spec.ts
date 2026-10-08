@@ -12,7 +12,8 @@ vi.stubGlobal('storeToRefs', storeToRefs)
 
 const chatHistoryPerModel = ref<Record<string, any[]>>({})
 const fetchChatHistory = vi.fn(async () => {})
-vi.stubGlobal('useChatStore', () => ({ chatHistoryPerModel, fetchChatHistory }))
+const applyReplyContext = vi.fn()
+vi.stubGlobal('useChatStore', () => ({ chatHistoryPerModel, fetchChatHistory, applyReplyContext }))
 
 const showSnackbarError = vi.fn()
 vi.stubGlobal('useSnackbarStore', () => ({ showSnackbarError }))

@@ -134,6 +134,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
 
       waitingForResponse.value = false
       if (message.done) {
+        if (message.context)
+          chatStore.applyReplyContext(message.context)
+
         const content = message.stopped
           ? botResponse.value
           : message.message
@@ -154,6 +157,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
               : {}),
             ...(notices.value.length
               ? { notices: notices.value }
+              : {}),
+            ...(message.context
+              ? { context: message.context }
               : {}),
           })
           pendingReplaceBackup.value = null

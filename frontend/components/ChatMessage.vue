@@ -20,6 +20,9 @@ const emit = defineEmits<{
   (e: 'requestSaveEdit', payload: { index: number, content: string }): void
   (e: 'cancelEdit'): void
   (e: 'switchBranch', payload: { index: number, siblingIndex: number }): void
+  (e: 'moreMemory', tokens: number): void
+  (e: 'summarizeMemory'): void
+  (e: 'continueFresh'): void
 }>()
 
 const splitContent = computed(() => splitMessageRaw(props.message.content))
@@ -72,6 +75,15 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
     </div>
 
     <MessageNotices :notices="message.notices ?? []" />
+
+    <MemoryNotice
+      v-if="message.context"
+      :context="message.context"
+      :actionable="isLast && actionsEnabled"
+      @more-memory="(tokens: number) => emit('moreMemory', tokens)"
+      @summarize="emit('summarizeMemory')"
+      @continue-fresh="emit('continueFresh')"
+    />
 
     <div class="assistant-body">
       <MessageParts :parts="splitContent.parts" />

@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'softReset'): void
+  (e: 'selectChat', chatId: string): void
 }>()
 
 const selectedModel = defineModel<IContainer | null>('selectedModel', { default: null, required: true })
@@ -32,7 +33,10 @@ const pendingEditIndex = ref<number | null>(null)
 const pendingEditContent = ref('')
 
 const chatStore = useChatStore()
-const { chatHistoryPerModel, aiModels, allChats } = storeToRefs(chatStore)
+const { chatHistoryPerModel, aiModels, allChats, chatContext } = storeToRefs(chatStore)
+
+const hardwareStore = useHardwareStore()
+const { hardware } = storeToRefs(hardwareStore)
 
 const containerStore = useContainerStore()
 
@@ -97,11 +101,64 @@ const currentChatGenerationParams = computed<IGenerationParams>(() => {
   }
 })
 
-async function handleGenerationParamsSave(params: IGenerationParams) {
+async function handleGenerationParamsSave(params: Partial<IGenerationParams>) {
   if (!selectedModel.value || !selectedChatId.value)
     return
 
   await chatStore.setChatGenerationParams(selectedModel.value.model, { id: selectedChatId.value }, params)
+}
+
+const memoryDialogOpen = ref(false)
+
+const currentChatSummary = computed(() => {
+  if (!selectedModel.value || !selectedChatId.value)
+    return null
+
+  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value) ?? null
+})
+
+const LOW_RAM_BYTES = 16 * 1024 ** 3
+
+const lowResources = computed(() => hardware.value.gpu_available === false
+  || (hardware.value.ram_bytes !== null && hardware.value.ram_bytes < LOW_RAM_BYTES))
+
+function refreshChatContext() {
+  if (selectedModel.value && selectedChatId.value)
+    chatStore.fetchChatContext(selectedModel.value.model, selectedChatId.value, selectedModel.value.parameters)
+}
+
+watch([selectedChatId, () => selectedModel.value?.model, () => selectedModel.value?.status], () => {
+  chatContext.value = null
+  refreshChatContext()
+}, { immediate: true })
+
+async function saveMemory(memory: { num_ctx?: number | null, memory_mode?: 'trim' | 'summarize' }) {
+  if (!selectedModel.value || !selectedChatId.value)
+    return
+
+  if (await chatStore.setChatMemory(selectedModel.value.model, { id: selectedChatId.value }, memory)) {
+    refreshChatContext()
+    snackbarStore.showSnackbarSuccess('Memory settings saved — they apply from the next message.')
+  }
+}
+
+function giveMoreMemory(tokens: number) {
+  saveMemory({ num_ctx: tokens })
+}
+
+function switchToSummarize() {
+  saveMemory({ memory_mode: 'summarize' })
+}
+
+async function continueInFreshChat() {
+  if (!selectedModel.value || !selectedChatId.value)
+    return
+
+  const newChatId = await chatStore.continueChat(selectedModel.value.model, selectedChatId.value)
+  if (newChatId) {
+    emit('selectChat', newChatId)
+    snackbarStore.showSnackbarInfo('New chat started — your first message there will include a summary of the old one.')
+  }
 }
 
 const promptTemplateDialogOpen = ref(false)
@@ -405,6 +462,7 @@ async function switchBranch(index: number, siblingIndex: number) {
     return
 
   await chatStore.switchBranch(selectedModel.value.model, selectedChatId.value, index, siblingIndex)
+  refreshChatContext()
 }
 
 function exportChat(format: 'md' | 'json') {
@@ -532,6 +590,20 @@ watch(waitingForResponse, (newValue) => {
           @use-suggestion="useSuggestion"
         />
 
+        <div
+          v-if="currentChatSummary?.continued_from"
+          class="continued-banner"
+        >
+          <v-icon size="14">
+            mdi-file-document-refresh-outline
+          </v-icon>
+
+          <span>
+            Continues "{{ currentChatSummary.continued_from.title }}" — the model starts out knowing a summary
+            of it.
+          </span>
+        </div>
+
         <TransitionGroup
           name="msg"
           tag="div"
@@ -551,6 +623,9 @@ watch(waitingForResponse, (newValue) => {
             @request-save-edit="handleRequestSaveEdit"
             @cancel-edit="handleCancelEdit"
             @switch-branch="handleSwitchBranch"
+            @more-memory="giveMoreMemory"
+            @summarize-memory="switchToSummarize"
+            @continue-fresh="continueInFreshChat"
           />
 
           <StreamingMessage
@@ -593,6 +668,12 @@ watch(waitingForResponse, (newValue) => {
           v-if="selectedChatId"
           class="chip-row"
         >
+          <MemoryMeter
+            v-if="chatContext"
+            :context="chatContext"
+            @open="memoryDialogOpen = true"
+          />
+
           <ChatSettingsChips
             :persona="currentChatPersona"
             :params="currentChatGenerationParams"
@@ -635,7 +716,7 @@ watch(waitingForResponse, (newValue) => {
     <ConfirmDialog
       v-model="editConfirmDialog"
       title="Edit and resend"
-      message="This replaces this message and deletes every reply after it in this conversation. This can't be undone."
+      message="This sends your edited message as a new branch. The original message and its replies aren't deleted — switch back to them any time with the ‹ › arrows."
       confirm-label="Edit and resend"
       confirm-color="mint-btn"
       @confirm="pendingEditIndex !== null && confirmSaveEdit(pendingEditIndex)"
@@ -652,6 +733,18 @@ watch(waitingForResponse, (newValue) => {
       v-model="parameterPanelOpen"
       :current-params="currentChatGenerationParams"
       @save="handleGenerationParamsSave"
+      @open-memory="memoryDialogOpen = true"
+    />
+
+    <MemoryDialog
+      v-model="memoryDialogOpen"
+      :context="chatContext"
+      :current-num-ctx="currentChatGenerationParams.num_ctx"
+      :memory-mode="currentChatSummary?.memory_mode ?? 'trim'"
+      :low-resources="lowResources"
+      :has-history="!!chatHistory.length"
+      @save="saveMemory"
+      @continue-fresh="continueInFreshChat"
     />
 
     <DocumentsDialog
@@ -774,6 +867,21 @@ watch(waitingForResponse, (newValue) => {
   max-width: 708px;
   margin: 0 auto;
   pointer-events: auto;
+}
+
+.continued-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 760px;
+  margin: 0 auto 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-line);
+  background: var(--color-card);
+  color: var(--color-ink-2);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .chip-row {

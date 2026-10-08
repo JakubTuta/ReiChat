@@ -1,4 +1,4 @@
-import type { Citation, GenerationStats, ToolCall } from '~/constants/websocket'
+import type { Citation, ContextReport, GenerationStats, ToolCall } from '~/constants/websocket'
 import type { IAIModel } from '~/models/aiModel'
 import { mapAIModel } from '~/models/aiModel'
 
@@ -22,6 +22,15 @@ export interface IChatMessage {
   tool_calls?: ToolCall[]
   // Same lifecycle again — reasons attached documents weren't searched.
   notices?: string[]
+  context?: ContextReport
+}
+
+export type MemoryMode = 'trim' | 'summarize'
+
+// What chat-context/ returns: memory use before anything is sent.
+export interface IChatContext extends ContextReport {
+  presets: Record<string, number>
+  tokens_per_page: number
 }
 
 export interface IGenerationParams {
@@ -37,6 +46,8 @@ export interface IChatSummary extends IGenerationParams {
   persona: { id: string, name: string } | null
   active_collections: { id: number, name: string }[]
   tools_enabled: boolean
+  memory_mode: MemoryMode
+  continued_from: { id: string, title: string } | null
 }
 
 export interface ISearchResult {
@@ -52,6 +63,9 @@ export const useChatStore = defineStore('chat', () => {
     [model: string]: IChatMessage[]
   }>({})
   const allChats = ref<{ [model: string]: IChatSummary[] }>({})
+  // Memory use of the open chat — from chat-context/ when it's opened, then
+  // from each reply's own report.
+  const chatContext = ref<IChatContext | null>(null)
 
   const loading = ref(false)
 
@@ -176,6 +190,8 @@ export const useChatStore = defineStore('chat', () => {
             seed: null,
             active_collections: [],
             tools_enabled: false,
+            memory_mode: 'trim',
+            continued_from: null,
           },
           ...allChats.value[model],
         ]
@@ -345,6 +361,69 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  const fetchChatContext = async (model: string, chatId: string, parameters: string) => {
+    try {
+      const response = await api.value.get(`chat-context/${model}/${chatId}`, { params: { parameters } })
+
+      if (response?.status === 200)
+        chatContext.value = response.data
+    }
+    catch (error: any) {
+      // The meter just stays hidden — it's informational, and a failure
+      // here (e.g. model container still starting) isn't worth a toast.
+      console.error(error)
+      chatContext.value = null
+    }
+  }
+
+  const applyReplyContext = (report: ContextReport) => {
+    chatContext.value = chatContext.value
+      ? { ...chatContext.value, ...report }
+      : null
+  }
+
+  const setChatMemory = async (
+    model: string,
+    chat: { id: string },
+    memory: { num_ctx?: number | null, memory_mode?: MemoryMode },
+  ): Promise<boolean> => {
+    try {
+      const response = await api.value.put(`all-chats/${model}`, { id: chat.id, ...memory })
+
+      if (response.status === 200) {
+        const foundChat = allChats.value[model]?.find(e => e.id === chat.id)
+        if (foundChat)
+          Object.assign(foundChat, memory)
+
+        return true
+      }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Failed to change memory settings.')
+    }
+
+    return false
+  }
+
+  const continueChat = async (model: string, chatId: string): Promise<string | null> => {
+    try {
+      const response = await api.value.post(`chat-continue/${model}`, { chat_id: chatId })
+
+      if (response.status === 201) {
+        await fetchAllChats(model)
+
+        return String(response.data.id)
+      }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Failed to start a new chat from this one.')
+    }
+
+    return null
+  }
+
   const searchChats = async (model: string, query: string): Promise<ISearchResult[]> => {
     const url = `search/${model}`
 
@@ -367,6 +446,7 @@ export const useChatStore = defineStore('chat', () => {
     aiModels,
     chatHistoryPerModel,
     allChats,
+    chatContext,
     loading,
     resetState,
     fetchAIModels,
@@ -381,6 +461,10 @@ export const useChatStore = defineStore('chat', () => {
     setChatActiveCollections,
     setChatToolsEnabled,
     setChatGenerationParams,
+    fetchChatContext,
+    applyReplyContext,
+    setChatMemory,
+    continueChat,
     searchChats,
   }
 })

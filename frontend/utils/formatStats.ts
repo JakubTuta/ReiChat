@@ -12,8 +12,5 @@ export function formatStats(stats?: GenerationStats): string {
   if (stats.completion_tokens !== undefined)
     parts.push(`${stats.completion_tokens} tokens`)
 
-  if (stats.context_used !== undefined && stats.context_limit)
-    parts.push(`${Math.round((stats.context_used / stats.context_limit) * 100)}% of context`)
-
   return parts.join(' · ')
 }

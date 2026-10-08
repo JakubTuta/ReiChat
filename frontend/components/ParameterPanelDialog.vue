@@ -6,17 +6,17 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'save', params: IGenerationParams): void
+  // num_ctx isn't edited here — it's the "Memory" setting (MemoryDialog).
+  (e: 'save', params: Omit<IGenerationParams, 'num_ctx'>): void
+  (e: 'openMemory'): void
 }>()
 
 const isOpen = defineModel<boolean>({ default: false, required: true })
 
 const DEFAULT_TEMPERATURE = 0.8
 const DEFAULT_TOP_P = 0.9
-const DEFAULT_NUM_CTX = 4096
 
 const temperature = ref<number | null>(null)
-const numCtx = ref<number | null>(null)
 const topP = ref<number | null>(null)
 const seed = ref<number | null>(null)
 
@@ -25,7 +25,6 @@ watch(isOpen, (open) => {
     return
 
   temperature.value = props.currentParams.temperature
-  numCtx.value = props.currentParams.num_ctx
   topP.value = props.currentParams.top_p
   seed.value = props.currentParams.seed
 })
@@ -46,14 +45,6 @@ const topPEnabled = computed({
   set: (enabled: boolean) => {
     topP.value = enabled
       ? DEFAULT_TOP_P
-      : null
-  },
-})
-const numCtxEnabled = computed({
-  get: () => numCtx.value !== null,
-  set: (enabled: boolean) => {
-    numCtx.value = enabled
-      ? DEFAULT_NUM_CTX
       : null
   },
 })
@@ -80,7 +71,6 @@ const topPSliderValue = computed({
 function save() {
   emit('save', {
     temperature: temperature.value,
-    num_ctx: numCtx.value,
     top_p: topP.value,
     seed: seed.value,
   })
@@ -90,7 +80,6 @@ function save() {
 
 function resetAll() {
   temperature.value = null
-  numCtx.value = null
   topP.value = null
   seed.value = null
 }
@@ -188,32 +177,13 @@ function resetAll() {
           />
         </div>
 
-        <div class="param-row">
-          <div class="param-row-header">
-            <div>
-              <span class="param-row-label">Context length</span>
-
-              <span class="param-row-value font-mono">num_ctx</span>
-            </div>
-
-            <v-switch
-              v-model="numCtxEnabled"
-              density="compact"
-              hide-details
-              color="mint-btn"
-            />
-          </div>
-
-          <v-text-field
-            v-model.number="numCtx"
-            :disabled="!numCtxEnabled"
-            type="number"
-            min="1"
-            step="1024"
-            density="compact"
-            hide-details
-          />
-        </div>
+        <button
+          type="button"
+          class="param-memory-link"
+          @click="isOpen = false; emit('openMemory')"
+        >
+          Looking for context length? It's under <strong>Memory</strong> now.
+        </button>
 
         <div class="param-row">
           <div class="param-row-header">
@@ -285,6 +255,19 @@ function resetAll() {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-ink);
+}
+
+.param-memory-link {
+  display: block;
+  margin-bottom: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--color-mint-deep);
+  cursor: pointer;
+  text-align: left;
 }
 
 .param-row-value {

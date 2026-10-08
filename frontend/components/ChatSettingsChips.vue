@@ -19,8 +19,6 @@ const activeParamLabels = computed(() => {
     entries.push(`temp ${props.params.temperature.toFixed(2)}`)
   if (props.params.top_p !== null)
     entries.push(`top_p ${props.params.top_p.toFixed(2)}`)
-  if (props.params.num_ctx !== null)
-    entries.push(`ctx ${props.params.num_ctx}`)
   if (props.params.seed !== null)
     entries.push(`seed ${props.params.seed}`)
 
