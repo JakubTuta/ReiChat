@@ -304,6 +304,26 @@ async def test_receive_surfaces_model_unavailable_as_readable_error(chat, monkey
     await communicator.disconnect()
 
 
+async def test_failure_during_generation_setup_still_sends_an_error_frame(chat, monkeypatch):
+    from django_app.rag import retrieval
+
+    def _broken_retrieval(chat_history, query):
+        raise RuntimeError("pgvector exploded")
+
+    monkeypatch.setattr(retrieval, "retrieve_context_for_chat", _broken_retrieval)
+
+    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
+    assert (await communicator.connect())[0]
+
+    await communicator.send_json_to(
+        {"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
+    )
+    response = await communicator.receive_json_from()
+
+    assert response == {"error": "An unexpected error occurred. Please try again.", "done": True}
+    await communicator.disconnect()
+
+
 async def test_receive_unknown_model_reports_invalid_instead_of_500(chat):
     communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
     assert (await communicator.connect())[0]

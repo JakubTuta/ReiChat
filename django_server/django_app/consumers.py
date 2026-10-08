@@ -281,19 +281,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     ) -> None:
         full_response = ""
         stats: functions.GenerationStats = {}
-        persona_prompt = await database_sync_to_async(
-            functions.get_persona_system_prompt
-        )(chat_history)
-        # Fetching active collections and running the pgvector search are
-        # both blocking (DB + Docker SDK + an HTTP call to the embedding
-        # model), same as get_ollama_url — run off the event loop so one
-        # chat's retrieval can't stall every other concurrent chat.
-        rag_context, citations = await sync_to_async(
-            rag_retrieval.retrieve_context_for_chat, thread_sensitive=False
-        )(chat_history, user_prompt)
-        system_prompt = (
-            "\n\n".join(p for p in (persona_prompt, rag_context) if p) or None
-        )
+        citations: list[rag_retrieval.Citation] = []
         # Plain columns on the already-fetched row — no query, safe to read
         # directly in this async method (unlike get_persona_system_prompt's
         # `.persona` access, which needs a real query when a persona is set).
@@ -351,17 +339,35 @@ class ChatConsumer(AsyncWebsocketConsumer):
             and chat_history.tools_enabled
             and ai_model.can_use_tools
         )
-        # MCP servers are global, not per-chat (see models.MCPServer) — only
-        # worth a query when the tool path is actually going to run.
-        mcp_servers = (
-            await database_sync_to_async(list)(
-                models.MCPServer.objects.filter(enabled=True)
-            )
-            if use_tools
-            else []
-        )
 
+        # Everything that can fail — including this setup — lives inside the
+        # try: an exception escaping here would end the task without ever
+        # sending a done/error frame, leaving the UI on "generating" forever
+        # with nothing left for Stop to cancel.
         try:
+            persona_prompt = await database_sync_to_async(
+                functions.get_persona_system_prompt
+            )(chat_history)
+            # Fetching active collections and running the pgvector search are
+            # both blocking (DB + Docker SDK + an HTTP call to the embedding
+            # model), same as get_ollama_url — run off the event loop so one
+            # chat's retrieval can't stall every other concurrent chat.
+            rag_context, citations = await sync_to_async(
+                rag_retrieval.retrieve_context_for_chat, thread_sensitive=False
+            )(chat_history, user_prompt)
+            system_prompt = (
+                "\n\n".join(p for p in (persona_prompt, rag_context) if p) or None
+            )
+            # MCP servers are global, not per-chat (see models.MCPServer) — only
+            # worth a query when the tool path is actually going to run.
+            mcp_servers = (
+                await database_sync_to_async(list)(
+                    models.MCPServer.objects.filter(enabled=True)
+                )
+                if use_tools
+                else []
+            )
+
             if structured_output is not None:
                 full_response = await functions.astream_structured_bot_response(
                     ai_model,
