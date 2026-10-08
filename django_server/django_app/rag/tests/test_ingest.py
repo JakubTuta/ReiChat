@@ -76,3 +76,45 @@ def test_ingest_document_missing_document_id_is_a_noop():
     # Shouldn't raise — the document may have been deleted before the
     # background thread got a chance to run.
     ingest.ingest_document(999999, "text")
+
+
+def test_mark_interrupted_fails_orphaned_documents_but_not_live_ones(collection, monkeypatch):
+    orphan = models.Document.objects.create(
+        collection=collection, filename="orphan.txt", status=models.Document.STATUS_PROCESSING
+    )
+    live = models.Document.objects.create(
+        collection=collection, filename="live.txt", status=models.Document.STATUS_PROCESSING
+    )
+    done = models.Document.objects.create(
+        collection=collection, filename="done.txt", status=models.Document.STATUS_READY
+    )
+    monkeypatch.setattr(ingest, "_active_ids", {live.id})
+
+    assert ingest.mark_interrupted_documents(collection.id) == 1
+
+    orphan.refresh_from_db()
+    live.refresh_from_db()
+    done.refresh_from_db()
+    assert orphan.status == models.Document.STATUS_FAILED
+    assert orphan.error_message == ingest.INTERRUPTED_MESSAGE
+    assert live.status == models.Document.STATUS_PROCESSING
+    assert done.status == models.Document.STATUS_READY
+
+
+def test_start_ingest_tracks_the_document_until_the_thread_finishes(monkeypatch):
+    seen_during: list[bool] = []
+    monkeypatch.setattr(ingest, "ingest_document", lambda doc_id, text: seen_during.append(doc_id in ingest._active_ids))
+
+    class _InlineThread:
+        def __init__(self, target, args, **kwargs):
+            self._run = lambda: target(*args)
+
+        def start(self):
+            self._run()
+
+    monkeypatch.setattr(ingest.threading, "Thread", _InlineThread)
+
+    ingest.start_ingest(4242, "text")
+
+    assert seen_during == [True]
+    assert 4242 not in ingest._active_ids

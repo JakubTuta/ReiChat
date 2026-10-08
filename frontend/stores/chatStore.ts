@@ -20,6 +20,8 @@ export interface IChatMessage {
   // Same lifecycle as stats/citations — only set on a message just streamed
   // this session, in call order, never persisted server-side.
   tool_calls?: ToolCall[]
+  // Same lifecycle again — reasons attached documents weren't searched.
+  notices?: string[]
 }
 
 export interface IGenerationParams {

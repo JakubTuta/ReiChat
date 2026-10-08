@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from django.db import transaction
 
@@ -7,6 +8,49 @@ from ..functions import ModelUnavailableError
 from . import chunking, embeddings
 
 logger = logging.getLogger(__name__)
+
+INTERRUPTED_MESSAGE = "Processing was interrupted (the app restarted). Upload the file again."
+
+# Ids with a live ingest thread in this process. Ingest runs in daemon
+# threads that die with the server, and only the extracted text (never
+# stored) could resume them — so a pending/processing row not in here is
+# stuck for good and has to be told so, instead of spinning forever.
+_active_ids: set[int] = set()
+_active_lock = threading.Lock()
+
+
+def start_ingest(document_id: int, text: str) -> None:
+    with _active_lock:
+        _active_ids.add(document_id)
+
+    threading.Thread(
+        target=_run_ingest,
+        args=(document_id, text),
+        daemon=True,
+        name=f"ingest-document-{document_id}",
+    ).start()
+
+
+def _run_ingest(document_id: int, text: str) -> None:
+    try:
+        ingest_document(document_id, text)
+    finally:
+        with _active_lock:
+            _active_ids.discard(document_id)
+
+
+def mark_interrupted_documents(collection_id: int | str) -> int:
+    with _active_lock:
+        active = set(_active_ids)
+
+    return (
+        models.Document.objects.filter(
+            collection_id=collection_id,
+            status__in=[models.Document.STATUS_PENDING, models.Document.STATUS_PROCESSING],
+        )
+        .exclude(id__in=active)
+        .update(status=models.Document.STATUS_FAILED, error_message=INTERRUPTED_MESSAGE)
+    )
 
 
 def ingest_document(document_id: int, text: str) -> None:

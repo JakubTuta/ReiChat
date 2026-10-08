@@ -4,6 +4,7 @@ import typing
 from pgvector.django import CosineDistance
 
 from .. import models
+from ..functions import ModelUnavailableError
 from . import embeddings
 
 logger = logging.getLogger(__name__)
@@ -25,19 +26,30 @@ class Citation(typing.TypedDict):
     chunk_index: int
 
 
+class RetrievalResult(typing.NamedTuple):
+    context: str
+    citations: list[Citation]
+    # Plain-language reasons some attached documents weren't searched —
+    # shown to the user, because an answer given without the documents
+    # they attached looks exactly like one given with them.
+    warnings: list[str]
+
+
 def build_rag_context(
     collections: list[models.DocumentCollection], query: str
-) -> tuple[str, list[Citation]]:
+) -> RetrievalResult:
     """Embeds `query` once per distinct embedding model among `collections`,
     runs an exact (not ANN — see DocumentChunk.embedding) cosine-nearest-
     neighbor search scoped to each collection's own chunks, and merges the
     results into one context block plus a citation list for the WS "done"
-    payload. Never raises — a collection whose embedding container isn't
-    running is skipped (logged), since a document being temporarily
-    unavailable shouldn't block the whole chat response.
+    payload. A collection whose embedding container isn't running is
+    skipped rather than blocking the reply, but never silently — it comes
+    back as a warning for the user.
     """
     if not collections:
-        return "", []
+        return RetrievalResult("", [], [])
+
+    warnings: list[str] = []
 
     by_model: dict[tuple[str, str], list[models.DocumentCollection]] = {}
     for collection in collections:
@@ -50,10 +62,18 @@ def build_rag_context(
         try:
             client = embeddings.get_embeddings_client(model_name, parameters)
             query_vector = client.embed_query(query)
+        except ModelUnavailableError as e:
+            logger.warning("Skipping RAG collection(s) %s: %s", [c.id for c in cols], e)
+            warnings.append(f"{_collection_names(cols)} weren't searched. {e}")
+            continue
         except Exception as e:
             logger.warning(
                 "Skipping RAG collection(s) %s — could not embed query: %s",
                 [c.id for c in cols], e,
+            )
+            warnings.append(
+                f"{_collection_names(cols)} weren't searched because the embedding model "
+                f"{model_name}:{parameters} didn't respond ({e})."
             )
             continue
 
@@ -67,8 +87,18 @@ def build_rag_context(
         )
         hits.extend((chunk.distance, chunk) for chunk in chunks)
 
+    still_processing = models.Document.objects.filter(
+        collection__in=collections,
+        status__in=[models.Document.STATUS_PENDING, models.Document.STATUS_PROCESSING],
+    ).count()
+    if still_processing:
+        warnings.append(
+            f"{still_processing} document{'s are' if still_processing != 1 else ' is'} still being "
+            "processed and couldn't be searched yet."
+        )
+
     if not hits:
-        return "", []
+        return RetrievalResult("", [], warnings)
 
     hits.sort(key=lambda pair: pair[0])
     top_chunks = [chunk for _, chunk in hits[:MAX_CONTEXT_CHUNKS]]
@@ -83,10 +113,15 @@ def build_rag_context(
             "chunk_index": chunk.chunk_index,
         })
 
-    return "\n".join(context_lines), citations
+    return RetrievalResult("\n".join(context_lines), citations, warnings)
 
 
-def retrieve_context_for_chat(chat_history: models.ChatHistory, query: str) -> tuple[str, list[Citation]]:
+def _collection_names(collections: list[models.DocumentCollection]) -> str:
+    quoted = ", ".join(f'"{c.name}"' for c in collections)
+    return f"Your documents in {quoted}"
+
+
+def retrieve_context_for_chat(chat_history: models.ChatHistory, query: str) -> RetrievalResult:
     """Entry point for consumers.py — fetching the chat's active collections
     and running the search are both blocking (DB + Docker SDK + HTTP), so
     the caller wraps this whole function in one sync_to_async call rather

@@ -40,6 +40,7 @@ const chatSocketStore = useChatSocketStore()
 const {
   botResponse,
   toolCallTrace,
+  notices,
   websocket,
   waitingForResponse,
   isReconnecting,
@@ -545,10 +546,11 @@ watch(waitingForResponse, (newValue) => {
           />
 
           <StreamingMessage
-            v-if="botResponse || toolCallTrace.length"
+            v-if="botResponse || toolCallTrace.length || notices.length"
             key="streaming"
             :content="botResponse"
             :tool-calls="toolCallTrace"
+            :notices="notices"
             :model="selectedModel"
           />
 

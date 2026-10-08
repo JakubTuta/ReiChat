@@ -520,7 +520,7 @@ def test_get_search_no_matches_returns_empty_list(client, chat):
 
 
 class _SyncThread:
-    """Stands in for threading.Thread in views.py so Documents.post's
+    """Stands in for threading.Thread in rag/ingest.py so Documents.post's
     background ingest runs inline instead of racing the test's assertions.
     """
 
@@ -535,9 +535,9 @@ class _SyncThread:
 
 @pytest.fixture
 def run_ingest_synchronously(monkeypatch):
-    from django_app import views
+    from django_app.rag import ingest
 
-    monkeypatch.setattr(views.threading, "Thread", _SyncThread)
+    monkeypatch.setattr(ingest.threading, "Thread", _SyncThread)
 
 
 @pytest.fixture

@@ -18,6 +18,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   const websocket = ref<WebSocketWrapper | null>(null)
   const botResponse = ref('')
   const toolCallTrace = ref<ToolCall[]>([])
+  const notices = ref<string[]>([])
   const waitingForResponse = ref(false)
   const isReconnecting = ref(false)
   const reconnectFailed = ref(false)
@@ -39,6 +40,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   function resetStreamState() {
     botResponse.value = ''
     toolCallTrace.value = []
+    notices.value = []
     waitingForResponse.value = false
     pendingReplaceBackup.value = null
   }
@@ -67,6 +69,10 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
       waitingForResponse.value = false
       restorePendingReplace()
       snackbarStore.showSnackbarError(errorMessage)
+    },
+
+    onNotice: (notice: string) => {
+      notices.value = [...notices.value, notice]
     },
 
     onSendMessage: (message: WebsocketMessage) => {
@@ -110,6 +116,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
             ...(toolCallTrace.value.length
               ? { tool_calls: toolCallTrace.value }
               : {}),
+            ...(notices.value.length
+              ? { notices: notices.value }
+              : {}),
           })
           pendingReplaceBackup.value = null
         }
@@ -118,6 +127,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
         }
         botResponse.value = ''
         toolCallTrace.value = []
+        notices.value = []
       }
       else {
         botResponse.value += message.message
@@ -244,6 +254,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     websocket,
     botResponse,
     toolCallTrace,
+    notices,
     waitingForResponse,
     isReconnecting,
     reconnectFailed,

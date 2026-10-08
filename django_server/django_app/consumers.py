@@ -352,9 +352,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # both blocking (DB + Docker SDK + an HTTP call to the embedding
             # model), same as get_ollama_url — run off the event loop so one
             # chat's retrieval can't stall every other concurrent chat.
-            rag_context, citations = await sync_to_async(
+            rag_context, citations, rag_warnings = await sync_to_async(
                 rag_retrieval.retrieve_context_for_chat, thread_sensitive=False
             )(chat_history, user_prompt)
+            # Sent before the answer starts, so the user knows up front that
+            # it's being written without some of their documents.
+            for warning in rag_warnings:
+                await self.send(text_data=json.dumps({"notice": warning, "done": False}))
             system_prompt = (
                 "\n\n".join(p for p in (persona_prompt, rag_context) if p) or None
             )

@@ -278,6 +278,8 @@ class Documents(APIView):
 
     @decorators.required_query_params(["collection_id"])
     def get(self, request: Request) -> Response:
+        rag_ingest.mark_interrupted_documents(request.query_params["collection_id"])
+
         documents = models.Document.objects.filter(
             collection_id=request.query_params["collection_id"]
         ).order_by("-uploaded_at")
@@ -316,13 +318,8 @@ class Documents(APIView):
         # Chunking + embedding involves real HTTP calls to the embedding
         # model and would block the request for a while on anything but a
         # tiny file — same background-worker pattern as container creation
-        # and catalog refresh (see Container.post / AIModels.put).
-        threading.Thread(
-            target=rag_ingest.ingest_document,
-            args=(document.id, text),
-            daemon=True,
-            name=f"ingest-document-{document.id}",
-        ).start()
+        # and catalog refresh (see container/install.py / AIModels.put).
+        rag_ingest.start_ingest(document.id, text)
 
         return Response(serializers.DocumentSerializer(document).data, status=status.HTTP_202_ACCEPTED)
 

@@ -5,6 +5,7 @@ import type { IContainer } from '~/models/container'
 const props = defineProps<{
   content: string
   toolCalls?: ToolCall[]
+  notices?: string[]
   model: IContainer | null
 }>()
 
@@ -30,6 +31,8 @@ const parts = computed(() => splitMessageRaw(props.content))
         :tool-calls="toolCalls ?? []"
       />
     </div>
+
+    <MessageNotices :notices="notices ?? []" />
 
     <div class="assistant-body">
       <MessageParts :parts="parts.parts" />

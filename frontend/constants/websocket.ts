@@ -49,6 +49,9 @@ export interface WebsocketResponse {
   // frame (see CompareConsumer/ChatConsumer — tool_call frames carry no
   // text of their own).
   tool_call?: ToolCall
+  // A standalone `done: false` frame sent before the answer starts — a
+  // plain-language reason some attached documents weren't searched.
+  notice?: string
 }
 
 export interface WebsocketHandlers {
@@ -57,6 +60,7 @@ export interface WebsocketHandlers {
   onSendMessage: (message: WebsocketMessage) => void
   onReceiveMessage: (data: WebsocketResponse) => void
   onError?: (message: string) => void
+  onNotice?: (notice: string) => void
   onReconnecting?: (attempt: number) => void
   onMaxReconnectFailed?: () => void
 }
@@ -144,6 +148,12 @@ export function getWebsocket(handlers: WebsocketHandlers, roomId: string, baseUR
 
         if (data.error) {
           handlers.onError?.(data.error)
+
+          return
+        }
+
+        if (data.notice) {
+          handlers.onNotice?.(data.notice)
 
           return
         }

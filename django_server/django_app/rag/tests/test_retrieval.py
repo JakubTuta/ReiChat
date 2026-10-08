@@ -53,7 +53,7 @@ def _make_chunk(
 
 
 def test_build_rag_context_empty_collections_returns_nothing():
-    context, citations = retrieval.build_rag_context([], "anything")
+    context, citations, warnings = retrieval.build_rag_context([], "anything")
 
     assert context == ""
     assert citations == []
@@ -64,7 +64,7 @@ def test_build_rag_context_returns_closest_chunk_first(monkeypatch, collection):
     _make_chunk(collection, "about dogs", [0.0, 1.0], filename="dogs.txt")
     _stub_embeddings(monkeypatch, [1.0, 0.0])
 
-    context, citations = retrieval.build_rag_context([collection], "cats")
+    context, citations, warnings = retrieval.build_rag_context([collection], "cats")
 
     assert citations[0]["filename"] == "cats.txt"
     assert "about cats" in context
@@ -75,7 +75,7 @@ def test_build_rag_context_ignores_non_ready_documents(monkeypatch, collection):
     _make_chunk(collection, "not ready yet", [1.0, 0.0], status=models.Document.STATUS_PROCESSING)
     _stub_embeddings(monkeypatch, [1.0, 0.0])
 
-    context, citations = retrieval.build_rag_context([collection], "anything")
+    context, citations, warnings = retrieval.build_rag_context([collection], "anything")
 
     assert context == ""
     assert citations == []
@@ -89,10 +89,39 @@ def test_build_rag_context_skips_collection_when_embedding_fails(monkeypatch, co
 
     monkeypatch.setattr(retrieval.embeddings, "get_embeddings_client", _raise)
 
-    context, citations = retrieval.build_rag_context([collection], "anything")
+    context, citations, warnings = retrieval.build_rag_context([collection], "anything")
 
     assert context == ""
     assert citations == []
+    assert len(warnings) == 1
+    assert '"Docs"' in warnings[0]
+
+
+def test_build_rag_context_warns_with_the_actionable_message_when_embedder_is_stopped(monkeypatch, collection):
+    from django_app.functions import ModelUnavailableError
+
+    _make_chunk(collection, "content", [1.0, 0.0])
+
+    def _raise(model, params):
+        raise ModelUnavailableError("Embedding model nomic:latest isn't running. Start it on the Models page.")
+
+    monkeypatch.setattr(retrieval.embeddings, "get_embeddings_client", _raise)
+
+    _, _, warnings = retrieval.build_rag_context([collection], "anything")
+
+    assert warnings == [
+        "Your documents in \"Docs\" weren't searched. "
+        "Embedding model nomic:latest isn't running. Start it on the Models page."
+    ]
+
+
+def test_build_rag_context_warns_about_documents_still_processing(monkeypatch, collection):
+    _make_chunk(collection, "not ready yet", [1.0, 0.0], status=models.Document.STATUS_PROCESSING)
+    _stub_embeddings(monkeypatch, [1.0, 0.0])
+
+    _, _, warnings = retrieval.build_rag_context([collection], "anything")
+
+    assert warnings == ["1 document is still being processed and couldn't be searched yet."]
 
 
 def test_build_rag_context_scopes_to_given_collections_only(monkeypatch, embedding_model):
@@ -106,7 +135,7 @@ def test_build_rag_context_scopes_to_given_collections_only(monkeypatch, embeddi
     _make_chunk(collection_b, "in collection B", [1.0, 0.0], filename="b.txt")
     _stub_embeddings(monkeypatch, [1.0, 0.0])
 
-    context, citations = retrieval.build_rag_context([collection_a], "anything")
+    context, citations, warnings = retrieval.build_rag_context([collection_a], "anything")
 
     assert {c["filename"] for c in citations} == {"a.txt"}
 
@@ -118,7 +147,7 @@ def test_retrieve_context_for_chat_uses_chats_active_collections(monkeypatch, co
     _make_chunk(collection, "relevant content", [1.0, 0.0], filename="doc.txt")
     _stub_embeddings(monkeypatch, [1.0, 0.0])
 
-    context, citations = retrieval.retrieve_context_for_chat(chat, "anything")
+    context, citations, warnings = retrieval.retrieve_context_for_chat(chat, "anything")
 
     assert citations[0]["filename"] == "doc.txt"
 
@@ -127,7 +156,7 @@ def test_retrieve_context_for_chat_no_active_collections_returns_nothing():
     ai_model = models.AIModel.objects.create(name="llama", model="llama-retrieval-test-2", index=1)
     chat = models.ChatHistory.objects.create(ai_model=ai_model, title="t")
 
-    context, citations = retrieval.retrieve_context_for_chat(chat, "anything")
+    context, citations, warnings = retrieval.retrieve_context_for_chat(chat, "anything")
 
     assert context == ""
     assert citations == []

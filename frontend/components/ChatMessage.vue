@@ -71,6 +71,8 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
       />
     </div>
 
+    <MessageNotices :notices="message.notices ?? []" />
+
     <div class="assistant-body">
       <MessageParts :parts="splitContent.parts" />
     </div>

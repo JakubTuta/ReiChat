@@ -46,6 +46,7 @@ beforeEach(() => {
     onSendMessage: vi.fn(),
     onReceiveMessage: vi.fn(),
     onError: vi.fn(),
+    onNotice: vi.fn(),
     onReconnecting: vi.fn(),
     onMaxReconnectFailed: vi.fn(),
   }
@@ -75,6 +76,15 @@ describe('getWebsocket reconnect wrapper', () => {
 
     first.readyState = FakeWebSocket.CLOSED
     expect(wrapper.readyState).toBe(FakeWebSocket.OPEN) // still reading `second`, not `first`
+  })
+
+  it('routes notice frames to onNotice, not onReceiveMessage', () => {
+    getWebsocket(handlers, 'room1', 'http://localhost:8000/')
+
+    instances[0].dispatch('message', { data: JSON.stringify({ notice: 'Docs not searched.', done: false }) })
+
+    expect(handlers.onNotice).toHaveBeenCalledWith('Docs not searched.')
+    expect(handlers.onReceiveMessage).not.toHaveBeenCalled()
   })
 
   it('sends on the current socket after a reconnect, not the dead one', () => {

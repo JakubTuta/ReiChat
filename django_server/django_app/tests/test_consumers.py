@@ -324,6 +324,32 @@ async def test_failure_during_generation_setup_still_sends_an_error_frame(chat, 
     await communicator.disconnect()
 
 
+async def test_rag_warnings_are_sent_as_notices_before_the_answer(chat, monkeypatch):
+    from django_app.rag import retrieval
+
+    monkeypatch.setattr(
+        retrieval,
+        "retrieve_context_for_chat",
+        lambda chat_history, query: retrieval.RetrievalResult("", [], ["Your documents weren't searched."]),
+    )
+
+    async def _fake_astream(*args, **kwargs):
+        yield "Answer"
+
+    monkeypatch.setattr(functions, "astream_bot_response", _fake_astream)
+
+    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
+    assert (await communicator.connect())[0]
+
+    await communicator.send_json_to(
+        {"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"}
+    )
+
+    assert await communicator.receive_json_from() == {"notice": "Your documents weren't searched.", "done": False}
+    assert await communicator.receive_json_from() == {"message": "Answer", "done": False}
+    await communicator.disconnect()
+
+
 async def test_receive_unknown_model_reports_invalid_instead_of_500(chat):
     communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
     assert (await communicator.connect())[0]

@@ -75,7 +75,7 @@ def test_same_origin_form_encoded_body_is_unsupported(client):
 def test_document_upload_still_accepts_multipart(client, monkeypatch):
     from django_app import views
 
-    monkeypatch.setattr(views.rag_ingest, "ingest_document", lambda *args: None)
+    monkeypatch.setattr(views.rag_ingest, "start_ingest", lambda *args: None)
     models.AIModel.objects.filter(model="nomic-embed-text-mw-test").delete()
     embedder = models.AIModel.objects.create(
         name="nomic-embed-text-mw-test", model="nomic-embed-text-mw-test", is_embedding=True
