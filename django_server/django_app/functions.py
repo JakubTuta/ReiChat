@@ -199,6 +199,22 @@ class ToolCallInfo(typing.TypedDict):
     result: str
 
 
+class ToolApprovalRequest(typing.TypedDict):
+    name: str
+    server: str
+    args: dict[str, typing.Any]
+
+
+# Asked before an MCP tool runs on a server that isn't auto-approved;
+# resolves True to run it.
+ToolApprover = typing.Callable[[ToolApprovalRequest], typing.Awaitable[bool]]
+
+# A tool's output goes straight back into the prompt; an unbounded one (a
+# web page, a directory listing) would blow through the context window.
+MAX_TOOL_RESULT_CHARS = 8000
+TOOL_DECLINED_RESULT = "The user declined to run this tool. Don't retry it; answer without it."
+
+
 MAX_TOOL_ITERATIONS = 5
 
 
@@ -213,6 +229,7 @@ async def astream_tool_response(
     stats: GenerationStats | None = None,
     mcp_servers: list[models.MCPServer] | None = None,
     reasoning: bool | str | None = None,
+    approve: ToolApprover | None = None,
 ) -> typing.AsyncGenerator[str | ThinkingDelta | ToolCallInfo, None]:
     """Like astream_bot_response, but binds the built-in tool set (plus any
     enabled MCP servers' tools) and runs the tool-call loop: ask the model,
@@ -290,7 +307,7 @@ async def astream_tool_response(
 
             for tool_call in response.tool_calls:
                 result = await _run_tool_call(
-                    tool_call["name"], tool_call["args"], mcp_lookup
+                    tool_call["name"], tool_call["args"], mcp_lookup, approve
                 )
 
                 yield {
@@ -318,10 +335,17 @@ async def astream_tool_response(
     )
 
 
+def _truncate_tool_result(result: str) -> str:
+    if len(result) <= MAX_TOOL_RESULT_CHARS:
+        return result
+    return f"{result[:MAX_TOOL_RESULT_CHARS]}\n[…output cut off after {MAX_TOOL_RESULT_CHARS} characters]"
+
+
 async def _run_tool_call(
     name: str,
     args: dict[str, typing.Any],
     mcp_lookup: dict[str, tuple[models.MCPServer, str]],
+    approve: ToolApprover | None = None,
 ) -> str:
     if name in BUILTIN_TOOLS_BY_NAME:
         return await sync_to_async(
@@ -330,8 +354,16 @@ async def _run_tool_call(
 
     if name in mcp_lookup:
         server, original_name = mcp_lookup[name]
+
+        # No approver (a caller with no one to ask) means no unapproved
+        # side effects either — refuse rather than run unattended.
+        if not server.auto_approve:
+            request: ToolApprovalRequest = {"name": original_name, "server": server.name, "args": args}
+            if approve is None or not await approve(request):
+                return TOOL_DECLINED_RESULT
+
         try:
-            return await mcp_client.call_server_tool(server, original_name, args)
+            return _truncate_tool_result(await mcp_client.call_server_tool(server, original_name, args))
         except Exception as e:
             logger.warning(
                 "MCP tool call failed for %s on server %r: %s",

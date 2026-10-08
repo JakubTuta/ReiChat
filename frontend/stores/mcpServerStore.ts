@@ -98,6 +98,26 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
     return false
   }
 
+  const setServerAutoApprove = async (id: number, autoApprove: boolean): Promise<boolean> => {
+    try {
+      const response = await api.value.put('mcp-servers/', { id, auto_approve: autoApprove })
+
+      if (response?.status === 200) {
+        const found = servers.value.find(s => s.id === id)
+        if (found)
+          found.auto_approve = autoApprove
+
+        return true
+      }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Failed to update the MCP server.')
+    }
+
+    return false
+  }
+
   const deleteServer = async (id: number): Promise<boolean> => {
     try {
       const response = await api.value.delete('mcp-servers/', { data: { id } })
@@ -125,6 +145,7 @@ export const useMCPServerStore = defineStore('mcpServer', () => {
     fetchServers,
     createServer,
     setServerEnabled,
+    setServerAutoApprove,
     deleteServer,
   }
 })

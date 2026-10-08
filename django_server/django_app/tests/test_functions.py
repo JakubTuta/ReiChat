@@ -205,7 +205,9 @@ def tool_test_model() -> models.AIModel:
 @pytest.fixture
 def mcp_test_server() -> models.MCPServer:
     models.MCPServer.objects.filter(name="Local").delete()
-    return models.MCPServer.objects.create(name="Local", transport=models.MCPServer.TRANSPORT_STDIO, command="x")
+    return models.MCPServer.objects.create(
+        name="Local", transport=models.MCPServer.TRANSPORT_STDIO, command="x", auto_approve=True
+    )
 
 
 async def test_astream_tool_response_executes_a_real_tool_then_streams_final_answer(tool_test_model, monkeypatch):
@@ -482,3 +484,76 @@ async def test_structured_output_constrains_decoding_with_the_schema(tool_test_m
     assert set(built_with["format"]["properties"]) == {"city", "population"}
     assert built_with["format"]["required"] == ["city", "population"]
     assert '"city": "Paris"' in result
+
+
+async def _run_one_mcp_call(monkeypatch, tool_test_model, server, approve, tool_output="results"):
+    monkeypatch.setattr(
+        functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
+    )
+    calls = []
+
+    async def _fake_list_tools(srv):
+        return [{"name": "search", "description": "Search", "input_schema": {"type": "object"}}]
+
+    async def _fake_call_tool(srv, tool_name, arguments):
+        calls.append(arguments)
+        return tool_output
+
+    monkeypatch.setattr(functions.mcp_client, "list_server_tools", _fake_list_tools)
+    monkeypatch.setattr(functions.mcp_client, "call_server_tool", _fake_call_tool)
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": f"mcp_{server.name}_search", "args": {"q": "x"}, "id": "c1"}),
+        _text_turn("done"),
+    ])
+    monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
+
+    chunks = [
+        c async for c in functions.astream_tool_response(
+            tool_test_model, "8b", "hi", "", [], mcp_servers=[server], approve=approve
+        )
+    ]
+    return chunks, calls
+
+
+@pytest.fixture
+def untrusted_server() -> models.MCPServer:
+    models.MCPServer.objects.filter(name="Untrusted").delete()
+    return models.MCPServer.objects.create(name="Untrusted", transport=models.MCPServer.TRANSPORT_HTTP, url="http://x")
+
+
+async def test_untrusted_mcp_tool_waits_for_the_users_approval(tool_test_model, untrusted_server, monkeypatch):
+    asked = []
+
+    async def _approve(request):
+        asked.append(request)
+        return True
+
+    chunks, calls = await _run_one_mcp_call(monkeypatch, tool_test_model, untrusted_server, _approve)
+
+    assert asked == [{"name": "search", "server": "Untrusted", "args": {"q": "x"}}]
+    assert calls == [{"q": "x"}]
+    assert chunks[0]["result"] == "results"
+
+
+async def test_denied_mcp_tool_never_runs(tool_test_model, untrusted_server, monkeypatch):
+    async def _deny(request):
+        return False
+
+    chunks, calls = await _run_one_mcp_call(monkeypatch, tool_test_model, untrusted_server, _deny)
+
+    assert calls == []
+    assert chunks[0]["result"] == functions.TOOL_DECLINED_RESULT
+
+
+async def test_untrusted_mcp_tool_without_anyone_to_ask_is_refused(tool_test_model, untrusted_server, monkeypatch):
+    chunks, calls = await _run_one_mcp_call(monkeypatch, tool_test_model, untrusted_server, None)
+
+    assert calls == []
+    assert chunks[0]["result"] == functions.TOOL_DECLINED_RESULT
+
+
+async def test_huge_tool_output_is_cut_down_before_reaching_the_model(tool_test_model, mcp_test_server, monkeypatch):
+    chunks, _ = await _run_one_mcp_call(monkeypatch, tool_test_model, mcp_test_server, None, tool_output="x" * 50_000)
+
+    assert len(chunks[0]["result"]) < functions.MAX_TOOL_RESULT_CHARS + 100
+    assert chunks[0]["result"].endswith("characters]")

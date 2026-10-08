@@ -883,7 +883,7 @@ async def test_edit_resend_missing_required_keys_reports_error(chat):
 
 
 async def test_receive_uses_tool_path_when_chat_and_model_both_allow_it(tools_chat, monkeypatch):
-    async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None, reasoning=None):
+    async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None, reasoning=None, approve=None):
         yield {"name": "calculator", "args": {"expression": "2+2"}, "result": "4"}
         yield "The answer is 4."
 
@@ -1010,4 +1010,31 @@ async def test_thinking_is_streamed_separately_and_saved_with_the_reply(chat, mo
     )()
     assert reply.content == "4"
     assert reply.thinking == "Hmm, easy."
+
+
+async def test_tool_approval_round_trip_over_the_socket(tools_chat, monkeypatch):
+    decisions = []
+
+    async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None, reasoning=None, approve=None):
+        decisions.append(await approve({"name": "send_email", "server": "Mail", "args": {"to": "a@b.c"}}))
+        yield "ok"
+
+    monkeypatch.setattr(functions, "astream_tool_response", _fake_astream_tools)
+
+    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{tools_chat.id}/")
+    assert (await communicator.connect())[0]
+    await communicator.send_json_to(
+        {"message": "mail it", "ai_model": "llama3.1-tools-test", "ai_model_parameters": "8b"}
+    )
+
+    request = await communicator.receive_json_from(timeout=5)
+    assert request["tool_approval"]["name"] == "send_email"
+    assert request["tool_approval"]["server"] == "Mail"
+    assert request["done"] is False
+
+    await communicator.send_json_to({"type": "tool_approval", "id": request["tool_approval"]["id"], "approved": False})
+
+    assert await communicator.receive_json_from(timeout=5) == {"message": "ok", "done": False}
+    assert decisions == [False]
+    await communicator.disconnect()
 

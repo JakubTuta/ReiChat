@@ -97,7 +97,9 @@ function cancelDelete() {
 
     <p class="page-lede">
       MCP servers you connect here contribute their tools to any chat with <strong>Tools</strong>
-      turned on — alongside the built-in calculator and current-time tools.
+
+      turned on — alongside the built-in calculator and current-time tools. With <strong>Ask first</strong>
+      on, you see and approve each tool call before it runs.
     </p>
 
     <div
@@ -143,6 +145,20 @@ function cancelDelete() {
         <span class="badge badge--grey">{{ server.transport === 'stdio'
           ? 'STDIO'
           : 'HTTP' }}</span>
+
+        <label
+          class="server-ask"
+          :title="server.auto_approve
+            ? 'Tools from this server run without asking'
+            : 'You approve each tool call first'"
+        >
+          <input
+            type="checkbox"
+            :checked="!server.auto_approve"
+            @change="mcpServerStore.setServerAutoApprove(server.id, !server.auto_approve)"
+          >
+          Ask first
+        </label>
 
         <v-btn
           size="small"
@@ -349,6 +365,16 @@ function cancelDelete() {
 
 .server-test--error {
   color: var(--color-red);
+}
+
+.server-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .badge {

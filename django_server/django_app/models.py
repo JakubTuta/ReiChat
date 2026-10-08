@@ -181,6 +181,11 @@ class MCPServer(models.Model):
     command = models.TextField(default="")
     url = models.TextField(default="")
     enabled = models.BooleanField(default=True)
+    # Off by default: an MCP tool can do anything its server can (send mail,
+    # delete files), and the model can be steered into calling one by text
+    # it reads — a web page, an attached document. So each call is shown to
+    # the user to allow or deny, unless they've said this server is trusted.
+    auto_approve = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

@@ -7,6 +7,8 @@ export interface IMCPServer {
   command: string
   url: string
   enabled: boolean
+  // Run this server's tools without asking first.
+  auto_approve: boolean
   created_at: string
 }
 

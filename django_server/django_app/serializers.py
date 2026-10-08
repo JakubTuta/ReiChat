@@ -43,7 +43,7 @@ class PromptTemplateSerializer(serializers.ModelSerializer):
 class MCPServerSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.MCPServer
-        fields: list[str] = ["id", "name", "transport", "command", "url", "enabled", "created_at"]
+        fields: list[str] = ["id", "name", "transport", "command", "url", "enabled", "auto_approve", "created_at"]
 
 
 class DocumentCollectionSerializer(serializers.ModelSerializer):

@@ -46,6 +46,7 @@ const {
   toolCallTrace,
   notices,
   thinkingResponse,
+  pendingApproval,
   websocket,
   waitingForResponse,
   isReconnecting,
@@ -140,6 +141,21 @@ async function saveMemory(memory: { num_ctx?: number | null, memory_mode?: 'trim
   if (await chatStore.setChatMemory(selectedModel.value.model, { id: selectedChatId.value }, memory)) {
     refreshChatContext()
     snackbarStore.showSnackbarSuccess('Memory settings saved — they apply from the next message.')
+  }
+}
+
+const mcpServerStore = useMCPServerStore()
+
+async function decideToolApproval({ approved, always }: { approved: boolean, always: boolean }) {
+  const server = pendingApproval.value?.server
+  chatSocketStore.respondToolApproval(approved)
+
+  if (always && server) {
+    if (!mcpServerStore.servers.length)
+      await mcpServerStore.fetchServers()
+    const found = mcpServerStore.servers.find(s => s.name === server)
+    if (found)
+      await mcpServerStore.setServerAutoApprove(found.id, true)
   }
 }
 
@@ -643,6 +659,13 @@ watch(waitingForResponse, (newValue) => {
             :notices="notices"
             :thinking="thinkingResponse"
             :model="selectedModel"
+          />
+
+          <ToolApprovalCard
+            v-if="pendingApproval"
+            key="approval"
+            :request="pendingApproval"
+            @decide="decideToolApproval"
           />
 
           <TypingIndicator

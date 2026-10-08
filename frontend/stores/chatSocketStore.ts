@@ -1,4 +1,4 @@
-import type { EditResendPayload, RegeneratePayload, ToolCall, WebsocketHandlers, WebsocketMessage, WebsocketResponse } from '~/constants/websocket'
+import type { EditResendPayload, RegeneratePayload, ToolApproval, ToolCall, WebsocketHandlers, WebsocketMessage, WebsocketResponse } from '~/constants/websocket'
 import type { IChatMessage } from '~/stores/chatStore'
 import { getWebsocket } from '~/constants/websocket'
 
@@ -20,6 +20,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   const toolCallTrace = ref<ToolCall[]>([])
   const notices = ref<string[]>([])
   const thinkingResponse = ref('')
+  const pendingApproval = ref<ToolApproval | null>(null)
   const waitingForResponse = ref(false)
   const isReconnecting = ref(false)
   const reconnectFailed = ref(false)
@@ -56,6 +57,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   }
 
   function resetStreamState() {
+    pendingApproval.value = null
     botResponse.value = ''
     toolCallTrace.value = []
     notices.value = []
@@ -125,8 +127,17 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     },
 
     onReceiveMessage: (message: WebsocketResponse) => {
-      if (message.done)
+      if (message.done) {
         lastPromptText = ''
+        pendingApproval.value = null
+      }
+
+      if (message.tool_approval) {
+        waitingForResponse.value = false
+        pendingApproval.value = message.tool_approval
+
+        return
+      }
 
       if (message.thinking) {
         waitingForResponse.value = false
@@ -243,6 +254,16 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     return true
   }
 
+  function respondToolApproval(approved: boolean) {
+    const request = pendingApproval.value
+    if (!request || !websocket.value)
+      return
+
+    websocket.value.respondToolApproval(request.id, approved)
+    pendingApproval.value = null
+    waitingForResponse.value = true
+  }
+
   function stopGeneration() {
     if (websocket.value?.readyState === WebSocket.OPEN)
       websocket.value.stopGeneration()
@@ -316,6 +337,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     toolCallTrace,
     notices,
     thinkingResponse,
+    pendingApproval,
     waitingForResponse,
     isReconnecting,
     reconnectFailed,
@@ -325,6 +347,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     reconnectManually,
     sendMessage,
     stopGeneration,
+    respondToolApproval,
     regenerate,
     editResend,
     restorePendingReplace,

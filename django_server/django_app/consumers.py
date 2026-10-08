@@ -4,6 +4,7 @@ import binascii
 import json
 import logging
 import typing
+import uuid
 
 from asgiref.sync import sync_to_async
 from channels.db import database_sync_to_async
@@ -20,13 +21,18 @@ MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB, measured on the decoded binary
 MAX_STRUCTURED_FIELD_DESCRIPTION_LENGTH = 500
 
 
+TOOL_APPROVAL_TIMEOUT_SECONDS = 300
+
+
 class ChatConsumer(AsyncWebsocketConsumer):
     generation_task: asyncio.Task | None = None
+    pending_approvals: dict[str, asyncio.Future[bool]]
 
     async def connect(self):
         self.room_name = self.scope["url_route"]["kwargs"]["chat_id"]
         self.room_group_name = f"chat_{self.room_name}"
         self.generation_task = None
+        self.pending_approvals = {}
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)  # type: ignore
         await self.accept()
@@ -61,6 +67,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         if message_type == "stop":
             await self._handle_stop()
+        elif message_type == "tool_approval":
+            self._handle_tool_approval(text_data_json)
         elif message_type == "prompt":
             await self._handle_prompt(text_data_json)
         elif message_type == "regenerate":
@@ -77,6 +85,28 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # Nothing to do here if there's no in-flight generation to cancel.
         if self._is_generating():
             self.generation_task.cancel()  # type: ignore[union-attr]
+
+    def _handle_tool_approval(self, text_data_json: dict) -> None:
+        future = self.pending_approvals.get(str(text_data_json.get("id", "")))
+        if future is not None and not future.done():
+            future.set_result(text_data_json.get("approved") is True)
+
+    async def _request_tool_approval(self, request: functions.ToolApprovalRequest) -> bool:
+        """Shows the user what an MCP tool is about to do and waits for
+        Allow/Deny. Works mid-generation because generation runs in its own
+        task, so receive() keeps handling incoming frames. Unanswered (tab
+        closed, user walked away) counts as denied."""
+        approval_id = uuid.uuid4().hex
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self.pending_approvals[approval_id] = future
+
+        await self.send(text_data=json.dumps({"tool_approval": {"id": approval_id, **request}, "done": False}))
+        try:
+            return await asyncio.wait_for(future, TOOL_APPROVAL_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return False
+        finally:
+            self.pending_approvals.pop(approval_id, None)
 
     async def _handle_prompt(self, text_data_json: dict) -> None:
         # dispatch() (channels/consumer.py) awaits each incoming message's
@@ -413,6 +443,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     stats,
                     mcp_servers,
                     reasoning,
+                    self._request_tool_approval,
                 ):
                     if isinstance(chunk, functions.ThinkingDelta):
                         full_thinking += chunk.text

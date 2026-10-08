@@ -37,6 +37,15 @@ export interface Citation {
   chunk_index: number
 }
 
+// An MCP tool call waiting for the user's Allow/Deny — see
+// ChatConsumer._request_tool_approval.
+export interface ToolApproval {
+  id: string
+  name: string
+  server: string
+  args: Record<string, unknown>
+}
+
 export interface ToolCall {
   name: string
   args: Record<string, unknown>
@@ -70,6 +79,9 @@ export interface WebsocketResponse {
   // A standalone `done: false` frame: the next piece of a thinking model's
   // reasoning, streamed apart from the answer (`message`).
   thinking?: string
+  // A standalone `done: false` frame: generation is paused until the user
+  // answers with respondToolApproval.
+  tool_approval?: ToolApproval
 }
 
 export interface WebsocketHandlers {
@@ -108,6 +120,7 @@ export interface WebSocketWrapper {
   // Edits the user message at `index` and discards everything from that
   // point on, replacing it with a freshly generated exchange.
   editResend: (payload: EditResendPayload) => void
+  respondToolApproval: (id: string, approved: boolean) => void
   closeConnection: () => void
 }
 
@@ -230,6 +243,12 @@ export function getWebsocket(handlers: WebsocketHandlers, roomId: string, baseUR
       else {
         console.warn('WebSocket is not open. Edit not sent.')
       }
+    },
+    respondToolApproval: (id: string, approved: boolean) => {
+      if (currentSocket.readyState === WebSocket.OPEN)
+        currentSocket.send(JSON.stringify({ type: 'tool_approval', id, approved }))
+      else
+        console.warn('WebSocket is not open. Tool approval not sent.')
     },
     closeConnection: () => {
       intentionallyClosed = true
