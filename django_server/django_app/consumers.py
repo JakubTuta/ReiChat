@@ -350,17 +350,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # very first message makes the new exchange a new root), so
             # is_edit_resend is the actual mode flag — it can't double as
             # "was a parent found".
+            model_label = f"{ai_model.model}:{ai_model_parameters}"
             if regenerate_from_user_message is not None:
                 await database_sync_to_async(functions.commit_new_assistant_branch)(
-                    chat_history, regenerate_from_user_message, content, full_thinking
+                    chat_history, regenerate_from_user_message, content, full_thinking, model_label
                 )
             elif is_edit_resend:
                 await database_sync_to_async(functions.commit_new_exchange_branch)(
-                    chat_history, edit_resend_parent, user_prompt, content, image, full_thinking
+                    chat_history, edit_resend_parent, user_prompt, content, image, full_thinking, model_label
                 )
             else:
                 await database_sync_to_async(functions.add_messages_to_history)(
-                    chat_history, user_prompt, content, image, full_thinking
+                    chat_history, user_prompt, content, image, full_thinking, model_label
                 )
 
         # Structured output and tool calling are separate response shapes —

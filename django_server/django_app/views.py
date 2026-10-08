@@ -658,7 +658,7 @@ class AllChats(APIView):
     }
 
     _UPDATABLE_CHAT_FIELDS = {
-        "title", "persona_id", "collection_ids", "tools_enabled", "memory_mode", "think_level",
+        "title", "persona_id", "collection_ids", "tools_enabled", "memory_mode", "think_level", "move_to_model",
         *_GENERATION_PARAM_BOUNDS,
     }
 
@@ -737,6 +737,22 @@ class AllChats(APIView):
 
             chat_history.tools_enabled = tools_enabled
             update_fields.append("tools_enabled")
+
+        if "move_to_model" in request_data:
+            # Continue this conversation with a different model: the chat
+            # moves to that model's list; earlier replies keep their own
+            # model_label, so nothing about who wrote what is lost.
+            target = models.AIModel.objects.filter(model=request_data["move_to_model"]).first()
+            if target is None:
+                return Response({"error": "AI model not found"}, status=status.HTTP_404_NOT_FOUND)
+            if target.is_embedding:
+                return Response(
+                    {"error": "Embedding models can't chat — pick a chat model."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            chat_history.ai_model = target
+            update_fields.append("ai_model")
 
         if "think_level" in request_data:
             think_level = request_data["think_level"]
@@ -834,6 +850,32 @@ class ContinueChat(APIView):
         continued.active_collections.set(source.active_collections.all())
 
         return Response({"id": continued.id, "title": continued.title}, status=status.HTTP_201_CREATED)
+
+
+class ChatFromCompare(APIView):
+    """Turns one answer from the Compare page into a regular chat with that
+    model, so the conversation can carry on from the best reply."""
+
+    @decorators.required_body_params(["parameters", "prompt", "response"])
+    def post(self, request: Request, model: str) -> Response:
+        request_data: dict[str, object] = request.data  # type: ignore
+
+        if (ai_model := models.AIModel.objects.filter(model=model).first()) is None:
+            return Response({"error": "AI model not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        prompt, response, parameters = (request_data[k] for k in ("prompt", "response", "parameters"))
+        if not all(isinstance(v, str) and v.strip() for v in (prompt, response, parameters)):
+            return Response(
+                {"error": "prompt, response and parameters must be non-empty strings"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        chat_history = models.ChatHistory.objects.create(ai_model=ai_model)
+        functions.add_messages_to_history(
+            chat_history, str(prompt), str(response), model_label=f"{model}:{parameters}"
+        )
+
+        return Response({"id": chat_history.id, "title": chat_history.title}, status=status.HTTP_201_CREATED)
 
 
 class ChatContext(APIView):

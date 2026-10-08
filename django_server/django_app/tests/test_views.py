@@ -44,8 +44,8 @@ def test_get_chat_history_returns_active_path_with_branch_metadata(client, branc
 
     assert response.status_code == 200
     assert response.json() == [
-        {"role": "user", "content": "Hi", "image": "", "thinking": "", "sibling_count": 1, "sibling_index": 0},
-        {"role": "assistant", "content": "Hi again", "image": "", "thinking": "", "sibling_count": 2, "sibling_index": 1},
+        {"role": "user", "content": "Hi", "image": "", "thinking": "", "model": "", "sibling_count": 1, "sibling_index": 0},
+        {"role": "assistant", "content": "Hi again", "image": "", "thinking": "", "model": "", "sibling_count": 2, "sibling_index": 1},
     ]
 
 
@@ -58,8 +58,8 @@ def test_patch_switch_branch_moves_active_leaf_to_chosen_sibling(client, branchi
 
     assert response.status_code == 200
     assert response.json() == [
-        {"role": "user", "content": "Hi", "image": "", "thinking": "", "sibling_count": 1, "sibling_index": 0},
-        {"role": "assistant", "content": "Hello", "image": "", "thinking": "", "sibling_count": 2, "sibling_index": 0},
+        {"role": "user", "content": "Hi", "image": "", "thinking": "", "model": "", "sibling_count": 1, "sibling_index": 0},
+        {"role": "assistant", "content": "Hello", "image": "", "thinking": "", "model": "", "sibling_count": 2, "sibling_index": 0},
     ]
 
     branching_chat.refresh_from_db()
@@ -1085,3 +1085,49 @@ def test_document_chunk_missing_says_so(client):
     response = client.get("/documents/chunk/?document_id=999999&chunk_index=0")
 
     assert response.status_code == 404
+
+
+def test_moving_a_chat_to_another_model_keeps_who_wrote_what(client, chat):
+    other = models.AIModel.objects.create(name="mistral", model="mistral-move-test", index=2)
+    user = models.ChatMessage.objects.create(chat=chat, role="user", content="Hi")
+    reply = models.ChatMessage.objects.create(
+        chat=chat, parent=user, role="assistant", content="Hello", model_label="llama3.1:8b"
+    )
+    chat.active_leaf = reply
+    chat.save(update_fields=["active_leaf"])
+
+    response = client.put(
+        _all_chats_url(chat), data=json.dumps({"id": chat.id, "move_to_model": "mistral-move-test"}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    chat.refresh_from_db()
+    assert chat.ai_model_id == other.id
+    history = client.get(f"/chat-history/mistral-move-test/{chat.id}").json()
+    assert history[1]["model"] == "llama3.1:8b"
+
+
+def test_chats_cannot_move_to_an_embedding_model(client, chat, embedding_model):
+    response = client.put(
+        _all_chats_url(chat), data=json.dumps({"id": chat.id, "move_to_model": embedding_model.model}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_compare_answer_becomes_a_chat(client, chat):
+    response = client.post(
+        f"/chat-from-compare/{chat.ai_model.model}",
+        data=json.dumps({"parameters": "8b", "prompt": "Capital of France?", "response": "Paris."}),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 201
+    new_id = response.json()["id"]
+    history = client.get(f"/chat-history/{chat.ai_model.model}/{new_id}").json()
+    assert [(m["role"], m["content"], m["model"]) for m in history] == [
+        ("user", "Capital of France?", ""),
+        ("assistant", "Paris.", "llama3.1:8b"),
+    ]

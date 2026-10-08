@@ -890,6 +890,7 @@ def serialize_active_path_for_display(chat_history: models.ChatHistory) -> list[
                 "content": str(message.content),
                 "image": str(message.image) if message.image else "",
                 "thinking": str(message.thinking),
+                "model": str(message.model_label),
                 "sibling_count": len(sibling_ids),
                 "sibling_index": sibling_ids.index(message.id),
             }
@@ -904,6 +905,7 @@ def add_messages_to_history(
     assistant_content: str,
     image: str = "",
     thinking: str = "",
+    model_label: str = "",
 ) -> None:
     with transaction.atomic():
         parent = chat_history.active_leaf
@@ -920,6 +922,7 @@ def add_messages_to_history(
             role="assistant",
             content=assistant_content,
             thinking=thinking,
+            model_label=model_label,
         )
         chat_history.active_leaf = assistant_message
         chat_history.save(update_fields=["active_leaf", "last_update_time"])
@@ -930,6 +933,7 @@ def commit_new_assistant_branch(
     parent_user_message: models.ChatMessage,
     assistant_content: str,
     thinking: str = "",
+    model_label: str = "",
 ) -> None:
     """Regenerate: adds a new sibling reply under the same user message
     instead of touching the old one. Only ever called once a new response
@@ -943,6 +947,7 @@ def commit_new_assistant_branch(
             role="assistant",
             content=assistant_content,
             thinking=thinking,
+            model_label=model_label,
         )
         chat_history.active_leaf = new_assistant
         chat_history.save(update_fields=["active_leaf", "last_update_time"])
@@ -955,6 +960,7 @@ def commit_new_exchange_branch(
     assistant_content: str,
     image: str = "",
     thinking: str = "",
+    model_label: str = "",
 ) -> None:
     """Edit-resend: branches a new user+assistant pair under the same parent
     the edited message had, leaving the old branch — and everything after
@@ -975,6 +981,7 @@ def commit_new_exchange_branch(
             role="assistant",
             content=assistant_content,
             thinking=thinking,
+            model_label=model_label,
         )
         chat_history.active_leaf = new_assistant
         chat_history.save(update_fields=["active_leaf", "last_update_time"])

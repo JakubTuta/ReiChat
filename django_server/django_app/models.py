@@ -148,6 +148,10 @@ class ChatMessage(models.Model):
     image = models.TextField(default="")
     # A thinking model's reasoning for this reply, kept apart from the answer.
     thinking = models.TextField(default="", blank=True)
+    # "name:tag" of the model that wrote an assistant reply — a chat can be
+    # continued with a different model, so the chat's own model isn't
+    # enough to tell who said what.
+    model_label = models.TextField(default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

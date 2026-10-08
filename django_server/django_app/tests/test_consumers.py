@@ -1075,3 +1075,14 @@ async def test_titled_chats_are_not_renamed(chat, monkeypatch):
 
     assert frames[-1]["done"] is True
 
+
+async def test_replies_record_which_model_wrote_them(chat, monkeypatch):
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream({}))
+
+    await _send_and_collect(chat)
+
+    reply = await database_sync_to_async(
+        lambda: models.ChatMessage.objects.filter(chat=chat, role="assistant").get()
+    )()
+    assert reply.model_label == "llama3.1:8b"
+
