@@ -27,6 +27,30 @@ const selectedKeys = ref<string[]>([])
 const results = ref<Record<string, ResultState>>({})
 const running = ref(false)
 const socket = ref<CompareSocketWrapper | null>(null)
+const BLIND_STORAGE_KEY = 'reichat.compare.blind'
+
+function readBlindPreference(): boolean {
+  try {
+    return localStorage.getItem(BLIND_STORAGE_KEY) === 'true'
+  }
+  catch {
+    return false
+  }
+}
+
+const blind = ref(readBlindPreference())
+
+function setBlind(value: boolean) {
+  blind.value = value
+  try {
+    localStorage.setItem(BLIND_STORAGE_KEY, String(value))
+  }
+  catch {
+    // Private windows can refuse storage; the choice then lasts for this visit only.
+  }
+}
+const displayOrder = ref<string[]>([])
+const pickedKey = ref<string | null>(null)
 
 onMounted(async () => {
   if (!aiModels.value.length)
@@ -44,6 +68,7 @@ onMounted(async () => {
   // models and typing a prompt to finish, the same way the chat page's
   // socket opens as soon as a chat is selected rather than on Send.
   ensureSocket()
+  fetchScoreboard()
 })
 
 onUnmounted(() => {
@@ -147,6 +172,10 @@ function runCompare() {
 
   const targets = selectableModels.value.filter(m => selectedKeys.value.includes(m.key))
   lastPrompt.value = prompt.value.trim()
+  pickedKey.value = null
+  displayOrder.value = blind.value
+    ? shuffled(targets.map(t => t.key))
+    : targets.map(t => t.key)
   results.value = Object.fromEntries(
     targets.map(t => [t.key, { content: '', done: false, error: null, stats: null } as ResultState]),
   )
@@ -157,6 +186,68 @@ function runCompare() {
 
 function stopCompare() {
   socket.value?.stop()
+}
+
+// Blind test: answers are shown as "Answer A/B/…" in a shuffled order
+// until the user picks the one they like best, so the model's reputation
+// can't sway the judgement.
+const scoreboard = ref<{ model: string, wins: number, matches: number, win_rate: number }[]>([])
+const clearScoresDialog = ref(false)
+const { api } = storeToRefs(useApiStore())
+
+const revealed = computed(() => !blind.value || pickedKey.value !== null)
+const canPick = computed(() => blind.value && !running.value && pickedKey.value === null
+  && displayOrder.value.filter(k => results.value[k]?.content && !results.value[k]?.error).length >= 2)
+
+function shuffled<T>(items: T[]): T[] {
+  const copy = [...items]
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+
+  return copy
+}
+
+async function fetchScoreboard() {
+  try {
+    scoreboard.value = (await api.value.get('compare-votes/')).data
+  }
+  catch (error: any) {
+    console.error(error)
+  }
+}
+
+async function pickBest(key: string) {
+  pickedKey.value = key
+  const contenders = displayOrder.value.filter(k => results.value[k]?.content && !results.value[k]?.error)
+  try {
+    await api.value.post('compare-votes/', { prompt: lastPrompt.value, winner: key, contenders })
+    await fetchScoreboard()
+  }
+  catch (error: any) {
+    console.error(error)
+    snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not save your pick.')
+  }
+}
+
+async function clearScoreboard() {
+  clearScoresDialog.value = false
+  try {
+    await api.value.delete('compare-votes/')
+    scoreboard.value = []
+  }
+  catch (error: any) {
+    console.error(error)
+    snackbarStore.showSnackbarError('Could not clear the scoreboard.')
+  }
+}
+
+function panelLabel(key: string): string {
+  if (revealed.value)
+    return labelFor(key)
+
+  return `Answer ${String.fromCharCode(65 + displayOrder.value.indexOf(key))}`
 }
 
 const continuingKey = ref<string | null>(null)
@@ -242,6 +333,34 @@ function labelFor(key: string): string {
 
         <v-spacer />
 
+        <div
+          class="mode-pills"
+          role="radiogroup"
+          aria-label="Comparison mode"
+        >
+          <button
+            type="button"
+            class="mode-pill"
+            :class="{'mode-pill--active': !blind}"
+            :disabled="running"
+            title="See which model wrote each answer"
+            @click="setBlind(false)"
+          >
+            Show models
+          </button>
+
+          <button
+            type="button"
+            class="mode-pill"
+            :class="{'mode-pill--active': blind}"
+            :disabled="running"
+            title="Hide the model names until you pick the best answer"
+            @click="setBlind(true)"
+          >
+            Blind test
+          </button>
+        </div>
+
         <v-btn
           v-if="!running"
           color="mint-btn"
@@ -266,19 +385,32 @@ function labelFor(key: string): string {
       </div>
     </div>
 
+    <p
+      v-if="canPick"
+      class="pick-hint"
+    >
+      Read the answers, then pick the one you like best — the model names are revealed after you choose.
+    </p>
+
     <div
       v-if="Object.keys(results).length"
       class="results-grid"
     >
       <div
-        v-for="key in Object.keys(results)"
+        v-for="key in displayOrder.filter(k => k in results)"
         :key="key"
         class="result-panel"
+        :class="{'result-panel--picked': pickedKey === key}"
       >
         <div class="result-header">
           <span class="result-dot" />
 
-          <span class="result-name">{{ labelFor(key) }}</span>
+          <span class="result-name">{{ panelLabel(key) }}</span>
+
+          <span
+            v-if="pickedKey === key"
+            class="result-picked"
+          >Your pick</span>
         </div>
 
         <div class="result-body">
@@ -309,14 +441,25 @@ function labelFor(key: string): string {
         </div>
 
         <div
-          v-if="results[key].stats"
+          v-if="results[key].stats && revealed"
           class="result-stats font-mono"
         >
           {{ formatStats(results[key].stats!) }}
         </div>
 
         <v-btn
-          v-if="results[key].done && !results[key].error && results[key].content"
+          v-if="canPick && results[key].content && !results[key].error"
+          size="small"
+          color="mint-btn"
+          variant="flat"
+          class="result-continue"
+          @click="pickBest(key)"
+        >
+          This one's best
+        </v-btn>
+
+        <v-btn
+          v-if="revealed && results[key].done && !results[key].error && results[key].content"
           size="small"
           variant="text"
           class="result-continue"
@@ -327,10 +470,156 @@ function labelFor(key: string): string {
         </v-btn>
       </div>
     </div>
+
+    <section
+      v-if="scoreboard.length"
+      class="scoreboard"
+    >
+      <div class="scoreboard-head">
+        <span class="mono-kicker">Your blind-test scoreboard</span>
+
+        <button
+          type="button"
+          class="scoreboard-clear"
+          @click="clearScoresDialog = true"
+        >
+          Clear
+        </button>
+      </div>
+
+      <div
+        v-for="row in scoreboard"
+        :key="row.model"
+        class="scoreboard-row"
+      >
+        <span class="scoreboard-model font-mono">{{ row.model }}</span>
+
+        <span class="scoreboard-bar">
+          <span
+            class="scoreboard-fill"
+            :style="{'width': `${Math.round(row.win_rate * 100)}%`}"
+          />
+        </span>
+
+        <span class="scoreboard-score">won {{ row.wins }} of {{ row.matches }}</span>
+      </div>
+    </section>
   </div>
+
+  <ConfirmDialog
+    v-model="clearScoresDialog"
+    title="Clear scoreboard"
+    message="This deletes every blind-test pick you've made. This can't be undone."
+    confirm-label="Clear"
+    confirm-color="red"
+    @confirm="clearScoreboard"
+    @cancel="clearScoresDialog = false"
+  />
 </template>
 
 <style scoped>
+.pick-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-mint-deep);
+}
+
+.result-panel--picked {
+  border-color: var(--color-mint-border) !important;
+  box-shadow: 0 0 0 2px var(--color-mint-tint);
+}
+
+.result-picked {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-mint-deep);
+}
+
+.mode-pills {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 20px;
+  border: 1px solid var(--color-line);
+  background: var(--color-soft);
+  margin-right: 8px;
+}
+
+.mode-pill {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-ink-2);
+  cursor: pointer;
+}
+
+.mode-pill--active {
+  background: var(--color-mint-tint);
+  color: var(--color-mint-ink);
+}
+
+.mode-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.scoreboard {
+  margin-top: 28px;
+  padding: 16px 18px;
+  border-radius: 13px;
+  border: 1px solid var(--color-line-2);
+  background: var(--color-card);
+}
+
+.scoreboard-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.scoreboard-clear {
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--color-ink-3);
+  cursor: pointer;
+}
+
+.scoreboard-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12.5px;
+}
+
+.scoreboard-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-ink);
+}
+
+.scoreboard-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-soft-2);
+  overflow: hidden;
+}
+
+.scoreboard-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-mint);
+}
+
+.scoreboard-score {
+  color: var(--color-ink-3);
+}
 .compare-page {
   max-width: 1080px;
   margin: 0 auto;
