@@ -21,6 +21,8 @@ const snackbarStore = useSnackbarStore()
 const wsBaseURL = useRuntimeConfig().public.serverUrl
 
 const prompt = ref('')
+// The prompt the current results answer — the box may be edited since.
+const lastPrompt = ref('')
 const selectedKeys = ref<string[]>([])
 const results = ref<Record<string, ResultState>>({})
 const running = ref(false)
@@ -144,6 +146,7 @@ function runCompare() {
     return
 
   const targets = selectableModels.value.filter(m => selectedKeys.value.includes(m.key))
+  lastPrompt.value = prompt.value.trim()
   results.value = Object.fromEntries(
     targets.map(t => [t.key, { content: '', done: false, error: null, stats: null } as ResultState]),
   )
@@ -154,6 +157,22 @@ function runCompare() {
 
 function stopCompare() {
   socket.value?.stop()
+}
+
+const continuingKey = ref<string | null>(null)
+
+async function continueInChat(key: string) {
+  const target = selectableModels.value.find(m => m.key === key)
+  const result = results.value[key]
+  if (!target || !result?.content)
+    return
+
+  continuingKey.value = key
+  const chatId = await chatStore.chatFromCompare(target.model, target.parameters, lastPrompt.value, result.content)
+  continuingKey.value = null
+
+  if (chatId)
+    await navigateTo({ path: '/chat', query: { model: target.model, parameters: target.parameters, chat: chatId } })
 }
 
 function labelFor(key: string): string {
@@ -295,6 +314,17 @@ function labelFor(key: string): string {
         >
           {{ formatStats(results[key].stats!) }}
         </div>
+
+        <v-btn
+          v-if="results[key].done && !results[key].error && results[key].content"
+          size="small"
+          variant="text"
+          class="result-continue"
+          :loading="continuingKey === key"
+          @click="continueInChat(key)"
+        >
+          Continue in chat →
+        </v-btn>
       </div>
     </div>
   </div>

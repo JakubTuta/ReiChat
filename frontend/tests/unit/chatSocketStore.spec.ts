@@ -118,7 +118,7 @@ describe('chatSocketStore', () => {
 
     expect(chatHistoryPerModel.value['llama3.1']).toEqual([
       { role: 'user', content: 'hi', image: '' },
-      { role: 'assistant', content: 'Hello', image: '' },
+      { role: 'assistant', content: 'Hello', image: '', model: 'llama3.1:8b' },
     ])
     expect(store.waitingForResponse).toBe(false)
     expect(store.botResponse).toBe('')

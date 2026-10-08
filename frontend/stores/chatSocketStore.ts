@@ -15,6 +15,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
 
   const activeChatId = ref('')
   const activeModel = ref('')
+  // Size tag of the model the in-flight reply comes from, for the reply's
+  // "who wrote this" label.
+  const activeParameters = ref('')
   const websocket = ref<WebSocketWrapper | null>(null)
   const botResponse = ref('')
   const toolCallTrace = ref<ToolCall[]>([])
@@ -191,6 +194,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
             ...(thinkingResponse.value
               ? { thinking: thinkingResponse.value }
               : {}),
+            model: `${activeModel.value}:${activeParameters.value}`,
           })
           pendingReplaceBackup.value = null
         }
@@ -253,6 +257,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
 
     waitingForResponse.value = true
     activeModel.value = message.ai_model
+    activeParameters.value = message.ai_model_parameters
     lastPromptText = message.message
     failedPrompt.value = ''
     websocket.value.sendMessage(message)
@@ -297,6 +302,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     list.splice(lastIndex, 1)
 
     activeModel.value = model
+    activeParameters.value = payload.ai_model_parameters
     waitingForResponse.value = true
     botResponse.value = ''
 
@@ -322,6 +328,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     list.splice(payload.index, list.length - payload.index, { role: 'user', content: payload.message, image: target.image })
 
     activeModel.value = model
+    activeParameters.value = payload.ai_model_parameters
     waitingForResponse.value = true
     botResponse.value = ''
 

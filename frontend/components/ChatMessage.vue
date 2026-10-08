@@ -89,9 +89,9 @@ function showCitation(citation: Citation) {
       <span class="assistant-dot" />
 
       <span
-        v-if="model"
+        v-if="message.model || model"
         class="assistant-model font-mono"
-      >{{ model.model }}:{{ model.parameters }}</span>
+      >{{ message.model || `${model!.model}:${model!.parameters}` }}</span>
 
       <MessageTrace
         :thoughts="message.thinking || splitContent.thoughts"

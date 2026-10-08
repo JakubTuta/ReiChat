@@ -27,6 +27,9 @@ export interface IChatMessage {
   // A thinking model's reasoning for this reply. Persisted, unlike the
   // fields above.
   thinking?: string
+  // "name:tag" of the model that wrote an assistant reply — a chat can
+  // switch models part-way through.
+  model?: string
 }
 
 export type MemoryMode = 'trim' | 'summarize'
@@ -382,8 +385,11 @@ export const useChatStore = defineStore('chat', () => {
     }
     catch (error: any) {
       // The meter just stays hidden — it's informational, and a failure
-      // here (e.g. model container still starting) isn't worth a toast.
-      console.error(error)
+      // here (e.g. model container still starting) isn't worth a toast. A
+      // 404 is expected for a moment after switching models, before the
+      // page has picked one of the new model's chats.
+      if (error.response?.status !== 404)
+        console.error(error)
       chatContext.value = null
     }
   }
@@ -436,6 +442,45 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     return false
+  }
+
+  const moveChat = async (fromModel: string, chatId: string, toModel: string): Promise<boolean> => {
+    try {
+      const response = await api.value.put(`all-chats/${fromModel}`, { id: chatId, move_to_model: toModel })
+
+      if (response.status === 200) {
+        if (allChats.value[fromModel])
+          allChats.value[fromModel] = allChats.value[fromModel].filter(c => c.id !== chatId)
+
+        return true
+      }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not switch this chat to the other model.')
+    }
+
+    return false
+  }
+
+  const chatFromCompare = async (
+    model: string,
+    parameters: string,
+    prompt: string,
+    response: string,
+  ): Promise<string | null> => {
+    try {
+      const result = await api.value.post(`chat-from-compare/${model}`, { parameters, prompt, response })
+
+      if (result.status === 201)
+        return String(result.data.id)
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not start a chat from this answer.')
+    }
+
+    return null
   }
 
   const continueChat = async (model: string, chatId: string): Promise<string | null> => {
@@ -497,6 +542,8 @@ export const useChatStore = defineStore('chat', () => {
     applyReplyContext,
     setChatMemory,
     setChatThinkLevel,
+    moveChat,
+    chatFromCompare,
     continueChat,
     searchChats,
   }

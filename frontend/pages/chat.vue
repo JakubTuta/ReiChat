@@ -18,7 +18,7 @@ const chatToDelete = ref<{ id: string } | null>(null)
 const searchDialogOpen = ref(false)
 
 const chatStore = useChatStore()
-const { aiModels, allChats } = storeToRefs(chatStore)
+const { aiModels, allChats, chatHistoryPerModel } = storeToRefs(chatStore)
 
 const containerStore = useContainerStore()
 const { containers } = storeToRefs(containerStore)
@@ -78,18 +78,88 @@ const userPulledModels = computed(() => {
     .sort((a, b) => a.value.localeCompare(b.value))
 })
 
+const route = useRoute()
+const router = useRouter()
+
 watch(userPulledModels, (newValue) => {
   if (!newValue.length) {
     selectedModel.value = null
 
     return
   }
+
+  // Arriving from "Continue in chat" on the Compare page: open that model
+  // and chat instead of the default first one.
+  const requested = route.query.model
+    ? newValue.find(m => m.model === route.query.model && m.parameters === route.query.parameters)
+    : null
+  if (requested) {
+    selectedModel.value = requested
+    if (typeof route.query.chat === 'string')
+      selectedChatId.value = route.query.chat
+    router.replace({ query: {} })
+
+    return
+  }
+
   const stillExists = selectedModel.value
     && newValue.some(m => m.model === selectedModel.value!.model
       && m.parameters === selectedModel.value!.parameters)
   if (!stillExists)
     selectedModel.value = newValue[0]
 }, { immediate: true })
+
+const switchDialogOpen = ref(false)
+const pendingModel = ref<IContainer | null>(null)
+
+function requestModelChange(model: IContainer | null) {
+  if (!model || (selectedModel.value?.model === model.model && selectedModel.value?.parameters === model.parameters))
+    return
+
+  const hasMessages = !!selectedModel.value
+    && !!selectedChatId.value
+    && !!chatHistoryPerModel.value[selectedModel.value.model]?.length
+
+  if (!hasMessages) {
+    selectedModel.value = model
+
+    return
+  }
+
+  pendingModel.value = model
+  switchDialogOpen.value = true
+}
+
+async function continueChatWithPendingModel() {
+  switchDialogOpen.value = false
+  const target = pendingModel.value
+  const source = selectedModel.value
+  const chatId = selectedChatId.value
+  pendingModel.value = null
+  if (!target || !source || !chatId)
+    return
+
+  // Same model family, different size: the chat already belongs to it —
+  // only the size used for the next reply changes.
+  if (target.model === source.model) {
+    selectedModel.value = target
+
+    return
+  }
+
+  if (await chatStore.moveChat(source.model, chatId, target.model)) {
+    selectedModel.value = target
+    await nextTick()
+    await chatStore.fetchChatHistory(target.model, chatId)
+  }
+}
+
+function startNewChatWithPendingModel() {
+  switchDialogOpen.value = false
+  if (pendingModel.value)
+    selectedModel.value = pendingModel.value
+  pendingModel.value = null
+}
 
 watch(selectedChatId, async (newChatId, oldChatId) => {
   if (!newChatId || !selectedModel.value || newChatId === oldChatId)
@@ -243,8 +313,9 @@ function handleSearchSelect(chatId: string) {
   <AppTopBar>
     <template #append>
       <ModelPillMenu
-        v-model="selectedModel"
+        :model-value="selectedModel"
         :models="userPulledModels"
+        @update:model-value="requestModelChange"
       />
     </template>
   </AppTopBar>
@@ -361,6 +432,49 @@ function handleSearchSelect(chatId: string) {
     </div>
   </v-navigation-drawer>
 
+  <v-dialog
+    v-model="switchDialogOpen"
+    max-width="440"
+    transition="dialog-rise-transition"
+  >
+    <v-card class="reichat-dialog">
+      <div class="reichat-dialog-header">
+        <span class="reichat-dialog-title">Switch to {{ pendingModel?.name }} {{ pendingModel?.parameters }}</span>
+      </div>
+
+      <v-card-text class="reichat-dialog-body switch-body">
+        Keep talking in this conversation with the new model, or start a fresh chat? Earlier replies
+        stay labeled with the model that wrote them.
+      </v-card-text>
+
+      <v-card-actions class="reichat-dialog-actions">
+        <v-btn
+          variant="text"
+          @click="switchDialogOpen = false; pendingModel = null"
+        >
+          Cancel
+        </v-btn>
+
+        <v-spacer />
+
+        <v-btn
+          variant="outlined"
+          @click="startNewChatWithPendingModel"
+        >
+          New chat
+        </v-btn>
+
+        <v-btn
+          color="mint-btn"
+          variant="flat"
+          @click="continueChatWithPendingModel"
+        >
+          Continue this chat
+        </v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
+
   <ConfirmDialog
     v-model="confirmDeleteDialog"
     title="Delete chat"
@@ -406,6 +520,12 @@ function handleSearchSelect(chatId: string) {
 </template>
 
 <style scoped>
+.switch-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-2);
+}
+
 .chat-drawer {
   background: var(--color-soft) !important;
   border-color: var(--color-line-2) !important;
