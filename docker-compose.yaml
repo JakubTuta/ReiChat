@@ -43,6 +43,11 @@ services:
       - default
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    # Lets "use my own Ollama" reach an Ollama running on the host at
+    # http://host.docker.internal:11434 — Docker Desktop provides that name
+    # already; Linux Docker Engine needs it mapped.
+    extra_hosts:
+      - host.docker.internal:host-gateway
     depends_on:
       postgres:
         condition: service_healthy

@@ -150,8 +150,8 @@ class ModelsView(View):
     "name:tag", the id /v1/chat/completions and /v1/embeddings accept."""
 
     def get(self, request: HttpRequest) -> HttpResponse:
-        manager = ContainerManager()
-        containers = manager.get_available_containers() if manager.is_connected() else []
+        # Lists the user's own Ollama too, which doesn't need Docker at all.
+        containers = ContainerManager().get_available_containers()
 
         data = [
             {

@@ -219,6 +219,12 @@ class ContainerManager:
         )
 
     def get_available_containers(self) -> list[dict[str, str]]:
+        # Imported here: external.py builds on this module.
+        from . import external
+
+        if (external_url := external.url()) is not None:
+            return external.list_models(external_url)
+
         if not self.is_connected() or self.client is None:
             return []
 

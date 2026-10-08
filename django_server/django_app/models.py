@@ -168,6 +168,16 @@ class ChatMessage(models.Model):
         return f"{self.role}: {self.content[:50]}"
 
 
+class AppSetting(models.Model):
+    """A setting the user changes from the UI — see app_settings.py."""
+
+    key = models.TextField(unique=True)
+    value = models.JSONField(null=True)
+
+    def __str__(self) -> str:
+        return self.key
+
+
 class CompareVote(models.Model):
     """One blind comparison the user judged: which answer they liked best
     among the models that answered the same prompt. Feeds the personal

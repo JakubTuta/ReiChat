@@ -14,6 +14,7 @@ from django_app import ollama_api, progress_state
 from django_app.catalog import registry
 from django_app.models import AIModel, AIModelVersion
 
+from . import external
 from .ContainerManager import ContainerError, ContainerManager
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,12 @@ def start_ollama_update() -> bool:
 def _ollama_update_worker() -> None:
     close_old_connections()
     try:
+        if external.url() is not None:
+            raise ContainerError(
+                "You're using your own Ollama, so update it the way you installed it (for example, the "
+                "Ollama app updates itself)."
+            )
+
         manager = ContainerManager()
         if not manager.is_connected() and not manager.connect_to_docker():
             raise ContainerError("Docker isn't running. Start Docker Desktop and try again.")
@@ -128,6 +135,10 @@ def _install_worker(model_name: str, parameters: str, container_name: str, force
 
 
 def _install(model_name: str, parameters: str, container_name: str, force_pull: bool = False) -> None:
+    if (external_url := external.url()) is not None:
+        _install_on_external(model_name, parameters, container_name, external_url)
+        return
+
     manager = ContainerManager()
     if not manager.is_connected() and not manager.connect_to_docker():
         raise ContainerError("Docker isn't running. Start Docker Desktop and try again.")
@@ -169,6 +180,23 @@ def _install(model_name: str, parameters: str, container_name: str, force_pull: 
         )
 
     ContainerManager.mark_installed(container)
+    _sync_custom_model_capabilities(model_name, parameters, base_url)
+
+
+def _install_on_external(model_name: str, parameters: str, container_name: str, base_url: str) -> None:
+    if external.version(base_url) is None:
+        raise ContainerError(f"Can't reach your Ollama at {base_url}. Check that it's running and try again.")
+
+    pulled, pull_error = ContainerManager().pull_model_with_progress(
+        model_name,
+        parameters,
+        base_url,
+        progress_cb=lambda pct, detail: _progress(container_name, "model_pull_progress", pct, detail),
+    )
+    if not pulled:
+        raise ContainerError(
+            f"The download stopped: {pull_error or 'unknown error'}. Try again to continue where it left off."
+        )
     _sync_custom_model_capabilities(model_name, parameters, base_url)
 
 

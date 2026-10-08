@@ -14,9 +14,10 @@ from langchain_core.messages import AIMessageChunk, ToolMessage, message_chunk_t
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_ollama import ChatOllama
 
+from container import external as external_ollama
 from container.ContainerManager import LABEL_GPU, ContainerManager
 
-from . import context_window, models, ollama_api, progress_state
+from . import app_settings, context_window, models, ollama_api, progress_state
 from .mcp_integration import client as mcp_client
 from .tools import web_search as web_search_tool
 from .tools.builtin import BUILTIN_TOOLS, BUILTIN_TOOLS_BY_NAME
@@ -559,6 +560,19 @@ def get_ollama_url(model_name: str, parameters: str) -> tuple[str, str] | None:
             "This model is still downloading. Wait for it to finish on the Models page, then try again."
         )
 
+    if (external_url := app_settings.external_ollama_url()) is not None:
+        installed = external_ollama.has_model(external_url, model_name, parameters)
+        if installed is None:
+            raise ModelUnavailableError(
+                f"Can't reach your Ollama at {external_url}. Check that it's running, or switch back to "
+                "app-managed models on the Models page."
+            )
+        if not installed:
+            raise ModelUnavailableError(
+                "This model isn't installed on your Ollama yet. Install it from the Models page first."
+            )
+        return external_url, f"{model_name}:{parameters}"
+
     container = container_manager.get_container(container_name)
     if container is None or container.status != "running":
         return None
@@ -592,6 +606,10 @@ def deserialize_messages(messages) -> list[dict[str, typing.Any]]:
     ]
 
 
+def external_url_in_use() -> bool:
+    return app_settings.external_ollama_url() is not None
+
+
 def get_model_info(model_name: str, parameters: str) -> ModelInfo | None:
     """What the model's own Ollama container says about it: its trained
     maximum context and whether/how it can think. None when that can't be
@@ -621,17 +639,22 @@ def get_gpu_share(model_name: str, parameters: str) -> float | None:
     slower — usually because a bigger memory (num_ctx) grew the KV cache
     past what the GPU holds. None when there's no GPU in play at all, so
     CPU-only machines are never nagged about it."""
-    manager = ContainerManager()
-    container = manager.get_container(ContainerManager.container_name(model_name, parameters))
-    if container is None or container.status != "running":
-        return None
-    if container.attrs.get("Config", {}).get("Labels", {}).get(LABEL_GPU) != "true":
-        return None
+    if (external_url := app_settings.external_ollama_url()) is not None:
+        # The user's own Ollama: no container label to say whether a GPU is
+        # involved, so trust /api/ps — a CPU-only machine reports no VRAM.
+        base_url: str | None = external_url
+    else:
+        manager = ContainerManager()
+        container = manager.get_container(ContainerManager.container_name(model_name, parameters))
+        if container is None or container.status != "running":
+            return None
+        if container.attrs.get("Config", {}).get("Labels", {}).get(LABEL_GPU) != "true":
+            return None
+        base_url = manager.base_url_for(container)
 
-    base_url = manager.base_url_for(container)
     running = ollama_api.running_models(base_url) if base_url else None
     entry = next((m for m in running or [] if m["name"] == f"{model_name}:{parameters}"), None)
-    if entry is None or not entry["size"]:
+    if entry is None or not entry["size"] or (external_url_in_use() and not entry["size_vram"]):
         return None
 
     return round(entry["size_vram"] / entry["size"], 2)
