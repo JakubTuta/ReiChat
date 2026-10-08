@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { IGenerationParams } from '~/stores/chatStore'
+import { thinkLevelLabel } from '~/utils/thinking'
 
 const props = defineProps<{
   persona: { id: string, name: string } | null
@@ -7,6 +8,7 @@ const props = defineProps<{
   activeCollectionsCount: number
   toolsEnabled: boolean
   jsonEnabled: boolean
+  thinkLevel: string
 }>()
 
 const emit = defineEmits<{
@@ -34,7 +36,10 @@ const paramsChipLabel = computed(() => {
   return `Parameters · ${activeParamLabels.value.length}`
 })
 
+const thinkingChipLabel = computed(() => thinkLevelLabel(props.thinkLevel))
+
 const hasAny = computed(() => !!props.persona
+  || !!thinkingChipLabel.value
   || !!paramsChipLabel.value
   || props.activeCollectionsCount > 0
   || props.toolsEnabled
@@ -71,6 +76,16 @@ const hasAny = computed(() => !!props.persona
     >
       <span class="setting-chip-dot" />
       Files · {{ activeCollectionsCount }}
+    </button>
+
+    <button
+      v-if="thinkingChipLabel"
+      type="button"
+      class="setting-chip"
+      @click="emit('open', 'tools')"
+    >
+      <span class="setting-chip-dot" />
+      {{ thinkingChipLabel }}
     </button>
 
     <button

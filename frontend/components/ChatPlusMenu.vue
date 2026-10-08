@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { IGenerationParams } from '~/stores/chatStore'
+import type { ThinkingControls } from '~/utils/thinking'
+import { thinkingOptions } from '~/utils/thinking'
 
 const props = defineProps<{
   persona: { id: string, name: string } | null
@@ -10,18 +12,22 @@ const props = defineProps<{
   jsonEnabled: boolean
   jsonFieldCount: number
   hasHistory: boolean
+  // null when the model can't think — the row is hidden then.
+  thinkingControls: ThinkingControls | null
+  thinkLevel: string
 }>()
 
 const emit = defineEmits<{
   (e: 'open', target: 'persona' | 'parameters' | 'files' | 'templates' | 'json'): void
   (e: 'toggleTools'): void
+  (e: 'setThinkLevel', thinkLevel: string): void
   (e: 'export', format: 'md' | 'json'): void
 }>()
 
 const isOpen = defineModel<boolean>({ default: false })
 
 const paramsSummary = computed(() => {
-  const count = [props.params.temperature, props.params.top_p, props.params.num_ctx, props.params.seed]
+  const count = [props.params.temperature, props.params.top_p, props.params.seed]
     .filter(v => v !== null)
     .length
 
@@ -29,6 +35,10 @@ const paramsSummary = computed(() => {
     ? `${count} set`
     : 'default'
 })
+
+const options = computed(() => (props.thinkingControls
+  ? thinkingOptions(props.thinkingControls)
+  : []))
 
 function pick(target: 'persona' | 'parameters' | 'files' | 'templates' | 'json') {
   emit('open', target)
@@ -158,6 +168,32 @@ function pickExport(format: 'md' | 'json') {
         />
       </div>
 
+      <div
+        v-if="thinkingControls"
+        class="thinking-row"
+      >
+        <div class="thinking-row-head">
+          <span>Think before answering</span>
+        </div>
+
+        <div class="thinking-pills">
+          <button
+            v-for="option in options"
+            :key="option.value"
+            type="button"
+            class="thinking-pill"
+            :class="{'thinking-pill--active': thinkLevel === option.value}"
+            @click="emit('setThinkLevel', option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+
+        <div class="thinking-hint">
+          Thinking makes replies slower, but better at math, logic and questions with several steps.
+        </div>
+      </div>
+
       <v-divider class="my-1" />
 
       <button
@@ -257,6 +293,46 @@ function pickExport(format: 'md' | 'json') {
   font-size: 10.5px;
   color: var(--color-ink-3);
   flex-shrink: 0;
+}
+
+.thinking-row {
+  padding: 8px;
+}
+
+.thinking-row-head {
+  font-size: 13px;
+  color: var(--color-ink);
+  margin-bottom: 6px;
+}
+
+.thinking-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.thinking-pill {
+  padding: 3px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--color-line);
+  background: var(--color-soft);
+  color: var(--color-ink-2);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.thinking-pill--active {
+  background: var(--color-mint-tint);
+  border-color: var(--color-mint-border);
+  color: var(--color-mint-ink);
+}
+
+.thinking-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-ink-3);
 }
 
 .plus-row-value--set {

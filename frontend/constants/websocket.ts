@@ -67,6 +67,9 @@ export interface WebsocketResponse {
   // A standalone `done: false` frame sent before the answer starts — a
   // plain-language reason some attached documents weren't searched.
   notice?: string
+  // A standalone `done: false` frame: the next piece of a thinking model's
+  // reasoning, streamed apart from the answer (`message`).
+  thinking?: string
 }
 
 export interface WebsocketHandlers {

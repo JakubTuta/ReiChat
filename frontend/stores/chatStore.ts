@@ -1,5 +1,6 @@
 import type { Citation, ContextReport, GenerationStats, ToolCall } from '~/constants/websocket'
 import type { IAIModel } from '~/models/aiModel'
+import type { ThinkingControls } from '~/utils/thinking'
 import { mapAIModel } from '~/models/aiModel'
 
 export interface IChatMessage {
@@ -23,6 +24,9 @@ export interface IChatMessage {
   // Same lifecycle again — reasons attached documents weren't searched.
   notices?: string[]
   context?: ContextReport
+  // A thinking model's reasoning for this reply. Persisted, unlike the
+  // fields above.
+  thinking?: string
 }
 
 export type MemoryMode = 'trim' | 'summarize'
@@ -31,6 +35,8 @@ export type MemoryMode = 'trim' | 'summarize'
 export interface IChatContext extends ContextReport {
   presets: Record<string, number>
   tokens_per_page: number
+  // null when the model can't think.
+  thinking: ThinkingControls | null
 }
 
 export interface IGenerationParams {
@@ -47,6 +53,7 @@ export interface IChatSummary extends IGenerationParams {
   active_collections: { id: number, name: string }[]
   tools_enabled: boolean
   memory_mode: MemoryMode
+  think_level: string
   continued_from: { id: string, title: string } | null
 }
 
@@ -191,6 +198,7 @@ export const useChatStore = defineStore('chat', () => {
             active_collections: [],
             tools_enabled: false,
             memory_mode: 'trim',
+            think_level: '',
             continued_from: null,
           },
           ...allChats.value[model],
@@ -406,6 +414,26 @@ export const useChatStore = defineStore('chat', () => {
     return false
   }
 
+  const setChatThinkLevel = async (model: string, chat: { id: string }, thinkLevel: string): Promise<boolean> => {
+    try {
+      const response = await api.value.put(`all-chats/${model}`, { id: chat.id, think_level: thinkLevel })
+
+      if (response.status === 200) {
+        const foundChat = allChats.value[model]?.find(e => e.id === chat.id)
+        if (foundChat)
+          foundChat.think_level = thinkLevel
+
+        return true
+      }
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Failed to change the thinking setting.')
+    }
+
+    return false
+  }
+
   const continueChat = async (model: string, chatId: string): Promise<string | null> => {
     try {
       const response = await api.value.post(`chat-continue/${model}`, { chat_id: chatId })
@@ -464,6 +492,7 @@ export const useChatStore = defineStore('chat', () => {
     fetchChatContext,
     applyReplyContext,
     setChatMemory,
+    setChatThinkLevel,
     continueChat,
     searchChats,
   }

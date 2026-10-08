@@ -19,6 +19,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
   const botResponse = ref('')
   const toolCallTrace = ref<ToolCall[]>([])
   const notices = ref<string[]>([])
+  const thinkingResponse = ref('')
   const waitingForResponse = ref(false)
   const isReconnecting = ref(false)
   const reconnectFailed = ref(false)
@@ -58,6 +59,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     botResponse.value = ''
     toolCallTrace.value = []
     notices.value = []
+    thinkingResponse.value = ''
     waitingForResponse.value = false
     pendingReplaceBackup.value = null
   }
@@ -95,6 +97,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
       botResponse.value = ''
       toolCallTrace.value = []
       notices.value = []
+      thinkingResponse.value = ''
       snackbarStore.showSnackbarError(errorMessage)
 
       if (hadPendingPrompt) {
@@ -124,6 +127,13 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     onReceiveMessage: (message: WebsocketResponse) => {
       if (message.done)
         lastPromptText = ''
+
+      if (message.thinking) {
+        waitingForResponse.value = false
+        thinkingResponse.value += message.thinking
+
+        return
+      }
 
       if (message.tool_call) {
         waitingForResponse.value = false
@@ -161,6 +171,9 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
             ...(message.context
               ? { context: message.context }
               : {}),
+            ...(thinkingResponse.value
+              ? { thinking: thinkingResponse.value }
+              : {}),
           })
           pendingReplaceBackup.value = null
         }
@@ -170,6 +183,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
         botResponse.value = ''
         toolCallTrace.value = []
         notices.value = []
+        thinkingResponse.value = ''
       }
       else {
         botResponse.value += message.message
@@ -301,6 +315,7 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
     botResponse,
     toolCallTrace,
     notices,
+    thinkingResponse,
     waitingForResponse,
     isReconnecting,
     reconnectFailed,

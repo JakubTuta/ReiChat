@@ -45,6 +45,7 @@ const {
   botResponse,
   toolCallTrace,
   notices,
+  thinkingResponse,
   websocket,
   waitingForResponse,
   isReconnecting,
@@ -140,6 +141,11 @@ async function saveMemory(memory: { num_ctx?: number | null, memory_mode?: 'trim
     refreshChatContext()
     snackbarStore.showSnackbarSuccess('Memory settings saved — they apply from the next message.')
   }
+}
+
+async function setThinkLevel(thinkLevel: string) {
+  if (selectedModel.value && selectedChatId.value)
+    await chatStore.setChatThinkLevel(selectedModel.value.model, { id: selectedChatId.value }, thinkLevel)
 }
 
 function setMemorySize(tokens: number) {
@@ -630,11 +636,12 @@ watch(waitingForResponse, (newValue) => {
           />
 
           <StreamingMessage
-            v-if="botResponse || toolCallTrace.length || notices.length"
+            v-if="botResponse || toolCallTrace.length || notices.length || thinkingResponse"
             key="streaming"
             :content="botResponse"
             :tool-calls="toolCallTrace"
             :notices="notices"
+            :thinking="thinkingResponse"
             :model="selectedModel"
           />
 
@@ -681,6 +688,9 @@ watch(waitingForResponse, (newValue) => {
             :active-collections-count="currentChatActiveCollections.length"
             :tools-enabled="currentChatToolsEnabled"
             :json-enabled="jsonEnforced"
+            :think-level="chatContext?.thinking
+              ? currentChatSummary?.think_level ?? ''
+              : ''"
             @open="openDialog"
           />
 
@@ -691,11 +701,14 @@ watch(waitingForResponse, (newValue) => {
             :active-collections-count="currentChatActiveCollections.length"
             :tools-enabled="currentChatToolsEnabled"
             :tools-available="!!selectedModel?.canUseTools"
+            :thinking-controls="chatContext?.thinking ?? null"
+            :think-level="currentChatSummary?.think_level ?? ''"
             :json-enabled="jsonEnforced"
             :json-field-count="structuredOutputFormat.length"
             :has-history="!!chatHistory.length"
             @open="openDialog"
             @toggle-tools="toggleTools"
+            @set-think-level="setThinkLevel"
             @export="exportChat"
           />
         </div>

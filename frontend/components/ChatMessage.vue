@@ -70,7 +70,7 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
       >{{ model.model }}:{{ model.parameters }}</span>
 
       <MessageTrace
-        :thoughts="splitContent.thoughts"
+        :thoughts="message.thinking || splitContent.thoughts"
         :tool-calls="message.tool_calls ?? []"
       />
     </div>
