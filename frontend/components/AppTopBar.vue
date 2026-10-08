@@ -7,6 +7,7 @@ const navItems = [
   { label: 'Models', to: '/models' },
   { label: 'Compare', to: '/compare' },
   { label: 'Integrations', to: '/integrations' },
+  { label: 'Your data', to: '/data' },
 ]
 
 function isActive(to: string) {

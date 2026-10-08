@@ -31,6 +31,13 @@ all in your browser.
   connect your own via [MCP](https://modelcontextprotocol.io).
 - **Prompt templates** — save reusable starter messages with fill-in-the-blank placeholders.
 - **Vision models** — attach an image to your message for models that support it.
+- **Thinking models** — watch models like Qwen 3 or DeepSeek-R1 reason before they answer, and
+  choose how much they think.
+- **Memory you control** — see how much of the conversation the model can keep in mind, make it
+  remember more, or have older messages summarized instead of forgotten.
+- **Any model** — besides the built-in list, install any Ollama model by name, including GGUF
+  models from Hugging Face.
+- **Backups** — save all your chats and settings to one file and restore them anywhere.
 
 ---
 
