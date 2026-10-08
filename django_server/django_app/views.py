@@ -467,10 +467,7 @@ class ChatHistory(APIView):
         ) is None:
             return Response([], status=status.HTTP_200_OK)
 
-        messages = functions.get_messages_for_chat(chat_history)
-        serialized_messages = functions.serialize_messages_for_display(messages)
-
-        return Response(serialized_messages, status=status.HTTP_200_OK)
+        return Response(functions.serialize_active_path_for_display(chat_history), status=status.HTTP_200_OK)
 
     @decorators.required_body_params(["index", "sibling_index"])
     def patch(self, request: Request, model: str, chat_id: str) -> Response:

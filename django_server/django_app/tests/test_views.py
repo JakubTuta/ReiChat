@@ -984,3 +984,18 @@ def test_mcp_server_test_reports_the_reason_it_failed(client, monkeypatch):
 
     assert response.status_code == 502
     assert response.json() == {"error": "The command 'npx' isn't available."}
+
+
+def test_get_chat_history_query_count_does_not_grow_with_chat_length(client, chat, django_assert_max_num_queries):
+    parent = None
+    for i in range(30):
+        role = "user" if i % 2 == 0 else "assistant"
+        parent = models.ChatMessage.objects.create(chat=chat, parent=parent, role=role, content=f"m{i}")
+    chat.active_leaf = parent
+    chat.save(update_fields=["active_leaf"])
+
+    with django_assert_max_num_queries(6):
+        response = client.get(_history_url(chat))
+
+    assert response.status_code == 200
+    assert [m["content"] for m in response.json()] == [f"m{i}" for i in range(30)]

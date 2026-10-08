@@ -588,16 +588,40 @@ def get_messages_for_chat(chat_history: models.ChatHistory) -> list[models.ChatM
     is what makes regenerate/edit-resend/branch-switch safe: an old branch's
     messages are never deleted, just left off this path.
     """
-    path: list[models.ChatMessage] = []
-    node = chat_history.active_leaf
+    return _load_active_path(chat_history)[0]
 
-    while node is not None:
-        path.append(node)
-        node = node.parent
 
-    path.reverse()
+def _load_active_path(
+    chat_history: models.ChatHistory,
+) -> tuple[list[models.ChatMessage], dict[int | None, list[int]]]:
+    """(active path, parent id -> child ids oldest first) in two queries,
+    however long the chat — following `.parent` one hop at a time used to
+    cost a query per message, plus one more per message for its siblings.
+    The tree pass reads only ids (no content, no base64 images); full rows
+    are fetched just for the messages actually on the path.
+    """
+    parent_of: dict[int, int | None] = {}
+    children_of: dict[int | None, list[int]] = {}
 
-    return path
+    tree_rows = (
+        models.ChatMessage.objects.filter(chat=chat_history)
+        .order_by("created_at", "id")
+        .values_list("id", "parent_id")
+    )
+    for message_id, parent_id in tree_rows:
+        parent_of[message_id] = parent_id
+        children_of.setdefault(parent_id, []).append(message_id)
+
+    path_ids: list[int] = []
+    node_id = chat_history.active_leaf_id
+    while node_id is not None and node_id in parent_of:
+        path_ids.append(node_id)
+        node_id = parent_of[node_id]
+    path_ids.reverse()
+
+    rows = models.ChatMessage.objects.in_bulk(path_ids)
+
+    return [rows[i] for i in path_ids], children_of
 
 
 def get_branch_siblings(message: models.ChatMessage) -> list[models.ChatMessage]:
@@ -623,24 +647,23 @@ def get_branch_leaf(message: models.ChatMessage) -> models.ChatMessage:
     return node
 
 
-def serialize_messages_for_display(
-    messages: list[models.ChatMessage],
-) -> list[dict[str, str | int]]:
-    """Like deserialize_messages, but for the REST/WS payloads the frontend
+def serialize_active_path_for_display(chat_history: models.ChatHistory) -> list[dict[str, str | int]]:
+    """Like deserialize_messages, but for the REST payloads the frontend
     renders from — adds branch position so a message with siblings can show
     a "◀ 2/3 ▶" switcher. Not used for LLM history, which has no use for it.
     """
+    path, children_of = _load_active_path(chat_history)
     result: list[dict[str, str | int]] = []
 
-    for message in messages:
-        siblings = get_branch_siblings(message)
+    for message in path:
+        sibling_ids = children_of.get(message.parent_id, [message.id])
         result.append(
             {
                 "role": str(message.role),
                 "content": str(message.content),
                 "image": str(message.image) if message.image else "",
-                "sibling_count": len(siblings),
-                "sibling_index": siblings.index(message),
+                "sibling_count": len(sibling_ids),
+                "sibling_index": sibling_ids.index(message.id),
             }
         )
 
@@ -794,7 +817,7 @@ def switch_branch(
     chat_history.active_leaf = get_branch_leaf(siblings[sibling_index])
     chat_history.save(update_fields=["active_leaf"])
 
-    return serialize_messages_for_display(get_messages_for_chat(chat_history))
+    return serialize_active_path_for_display(chat_history)
 
 
 def get_ai_model(value: str) -> models.AIModel | None:
