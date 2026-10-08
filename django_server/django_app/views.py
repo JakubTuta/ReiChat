@@ -1,10 +1,15 @@
+import dataclasses
+import json
 import logging
 import re
 import threading
+import typing
 
 from asgiref.sync import async_to_sync
 from django.db import close_old_connections
 from django.db.models import Count, Q
+from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.request import Request
@@ -13,7 +18,7 @@ from rest_framework.views import APIView
 
 from helpers import decorators
 
-from . import context_window, functions, models, serializers
+from . import backup, context_window, functions, models, serializers
 from .catalog import sync as catalog_sync
 from .mcp_integration import client as mcp_client
 from .rag import extract as rag_extract
@@ -167,6 +172,76 @@ class CustomModels(APIView):
 
         ai_model.delete()
         return Response({"status": "Custom model removed"}, status=status.HTTP_200_OK)
+
+
+MAX_BACKUP_BYTES = 500 * 1024 * 1024
+
+
+def _read_json_upload(request: Request) -> tuple[typing.Any, Response | None]:
+    uploaded_file = request.FILES.get("file")
+    if uploaded_file is None:
+        return None, Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+    if uploaded_file.size and uploaded_file.size > MAX_BACKUP_BYTES:
+        return None, Response({"error": "That file is too large to import."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        return json.loads(uploaded_file.read()), None
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None, Response(
+            {"error": "That file couldn't be read — it isn't valid JSON."}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+class Backup(APIView):
+    parser_classes = [MultiPartParser]
+
+    def get(self, request: Request) -> HttpResponse:
+        include_documents = request.query_params.get("documents") == "true"
+        payload = json.dumps(backup.export_data(include_documents))
+        filename = f"reichat-backup-{timezone.now():%Y-%m-%d}.json"
+
+        response = HttpResponse(payload, content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    def post(self, request: Request) -> Response:
+        data, error = _read_json_upload(request)
+        if error is not None:
+            return error
+
+        try:
+            report = backup.import_data(data)
+        except backup.BackupFormatError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning("Backup import failed on malformed data: %s", e)
+            return Response(
+                {"error": "Part of that backup file is damaged, so nothing was imported."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(dataclasses.asdict(report), status=status.HTTP_200_OK)
+
+
+class ChatImport(APIView):
+    parser_classes = [MultiPartParser]
+
+    def post(self, request: Request, model: str) -> Response:
+        if not models.AIModel.objects.filter(model=model).exists():
+            return Response({"error": "AI model not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data, error = _read_json_upload(request)
+        if error is not None:
+            return error
+
+        try:
+            chat = backup.import_single_chat(data, model)
+        except backup.BackupFormatError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {"id": chat.id, "title": chat.title, "model": chat.ai_model.model}, status=status.HTTP_201_CREATED
+        )
 
 
 class Personas(APIView):

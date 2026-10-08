@@ -23,4 +23,6 @@ urlpatterns: list[URLPattern] = [
     path("mcp-servers/", views.MCPServers.as_view(), name="mcp_servers"),
     path("mcp-servers/test/", views.MCPServerTest.as_view(), name="mcp_server_test"),
     path("custom-models/", views.CustomModels.as_view(), name="custom_models"),
+    path("backup/", views.Backup.as_view(), name="backup"),
+    path("chat-import/<path:model>", views.ChatImport.as_view(), name="chat_import"),
 ]
