@@ -63,6 +63,19 @@ export function nextPreset(currentLimit: number, modelMax: number | null): Memor
   return MEMORY_PRESETS.find(p => p.tokens > currentLimit && (modelMax === null || p.tokens <= modelMax)) ?? null
 }
 
+// The next smaller preset, for when a big memory pushes part of the model
+// out of GPU memory and slows every reply down.
+export function previousPreset(currentLimit: number): MemoryPreset | null {
+  return [...MEMORY_PRESETS].reverse().find(p => p.tokens < currentLimit) ?? null
+}
+
+// Below this, enough of the model runs on the CPU that it's worth saying so.
+export const GPU_SPILL_THRESHOLD = 0.95
+
+export function spillsOutOfGpu(report: { gpu_share?: number | null }): boolean {
+  return report.gpu_share !== undefined && report.gpu_share !== null && report.gpu_share < GPU_SPILL_THRESHOLD
+}
+
 export function availablePresets(modelMax: number | null): MemoryPreset[] {
   return MEMORY_PRESETS.filter(p => modelMax === null || p.tokens <= modelMax)
 }

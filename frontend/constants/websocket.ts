@@ -26,6 +26,9 @@ export interface ContextReport {
   dropped: number
   // Older messages were replaced by a running summary.
   summarized: boolean
+  // Share (0–1) of the model that fit in GPU memory for this reply; null
+  // when no GPU is involved.
+  gpu_share?: number | null
 }
 
 export interface Citation {

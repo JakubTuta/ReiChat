@@ -61,6 +61,7 @@ def _no_model_context_lookup(monkeypatch):
     # The real lookup asks the model's Ollama container for its maximum
     # context; there's no container here. Tests that care override this.
     monkeypatch.setattr(functions, "get_model_context_length", lambda model_name, parameters: None)
+    monkeypatch.setattr(functions, "get_gpu_share", lambda model_name, parameters: None)
 
 
 def _without_context(frame: dict) -> dict:
@@ -966,3 +967,12 @@ async def test_receive_structured_output_takes_priority_over_tools(tools_chat, m
     assert response["message"] == '```json\n{"a": 1}\n```'
 
     await communicator.disconnect()
+
+
+async def test_done_frame_reports_how_much_of_the_model_fits_on_the_gpu(chat, monkeypatch):
+    monkeypatch.setattr(functions, "get_gpu_share", lambda model_name, parameters: 0.6)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream({}))
+
+    done = (await _send_and_collect(chat))[-1]
+
+    assert done["context"]["gpu_share"] == 0.6

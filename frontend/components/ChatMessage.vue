@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'cancelEdit'): void
   (e: 'switchBranch', payload: { index: number, siblingIndex: number }): void
   (e: 'moreMemory', tokens: number): void
+  (e: 'lessMemory', tokens: number): void
   (e: 'summarizeMemory'): void
   (e: 'continueFresh'): void
 }>()
@@ -81,6 +82,7 @@ const hasBranches = computed(() => (props.message.sibling_count ?? 0) > 1)
       :context="message.context"
       :actionable="isLast && actionsEnabled"
       @more-memory="(tokens: number) => emit('moreMemory', tokens)"
+      @less-memory="(tokens: number) => emit('lessMemory', tokens)"
       @summarize="emit('summarizeMemory')"
       @continue-fresh="emit('continueFresh')"
     />

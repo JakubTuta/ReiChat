@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ContextReport } from '~/constants/websocket'
-import { nextPreset } from '~/utils/memory'
+import { nextPreset, previousPreset, spillsOutOfGpu } from '~/utils/memory'
 
 const props = defineProps<{
   context: ContextReport
@@ -11,11 +11,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'moreMemory', tokens: number): void
+  (e: 'lessMemory', tokens: number): void
   (e: 'summarize'): void
   (e: 'continueFresh'): void
 }>()
 
 const bigger = computed(() => nextPreset(props.context.limit, props.context.model_max))
+const smaller = computed(() => previousPreset(props.context.limit))
+const spilling = computed(() => spillsOutOfGpu(props.context))
+const gpuPercent = computed(() => Math.round((props.context.gpu_share ?? 0) * 100))
 </script>
 
 <template>
@@ -67,6 +71,42 @@ const bigger = computed(() => nextPreset(props.context.limit, props.context.mode
         @click="emit('continueFresh')"
       >
         Start a fresh chat with a summary
+      </button>
+    </div>
+  </div>
+
+  <div
+    v-if="spilling"
+    class="memory-notice"
+    role="status"
+  >
+    <div class="memory-notice-text">
+      <v-icon
+        size="14"
+        class="memory-notice-icon"
+      >
+        mdi-speedometer-slow
+      </v-icon>
+
+      <span>
+        Only {{ gpuPercent }}% of the model fits in your graphics card's memory at this memory size, so
+        the rest runs on the much slower processor.
+        <template v-if="smaller">
+          A shorter memory usually makes replies a lot faster.
+        </template>
+      </span>
+    </div>
+
+    <div
+      v-if="actionable && smaller"
+      class="memory-notice-actions"
+    >
+      <button
+        type="button"
+        class="memory-notice-btn memory-notice-btn--primary"
+        @click="emit('lessMemory', smaller.tokens)"
+      >
+        Use shorter memory ({{ smaller.label }})
       </button>
     </div>
   </div>

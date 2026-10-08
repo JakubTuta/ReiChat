@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessageChunk, ToolMessage, message_chunk_t
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_ollama import ChatOllama
 
-from container.ContainerManager import ContainerManager
+from container.ContainerManager import LABEL_GPU, ContainerManager
 
 from . import context_window, models, ollama_api, progress_state
 from .mcp_integration import client as mcp_client
@@ -501,6 +501,28 @@ def get_model_context_length(model_name: str, parameters: str) -> int | None:
 
     info = ollama_api.show_model(*url_info)
     return ollama_api.context_length(info) if info else None
+
+
+def get_gpu_share(model_name: str, parameters: str) -> float | None:
+    """Fraction (0–1) of the loaded model that sits in GPU memory, per
+    /api/ps. Below 1 means part of it spilled to the CPU and every token is
+    slower — usually because a bigger memory (num_ctx) grew the KV cache
+    past what the GPU holds. None when there's no GPU in play at all, so
+    CPU-only machines are never nagged about it."""
+    manager = ContainerManager()
+    container = manager.get_container(ContainerManager.container_name(model_name, parameters))
+    if container is None or container.status != "running":
+        return None
+    if container.attrs.get("Config", {}).get("Labels", {}).get(LABEL_GPU) != "true":
+        return None
+
+    base_url = manager.base_url_for(container)
+    running = ollama_api.running_models(base_url) if base_url else None
+    entry = next((m for m in running or [] if m["name"] == f"{model_name}:{parameters}"), None)
+    if entry is None or not entry["size"]:
+        return None
+
+    return round(entry["size_vram"] / entry["size"], 2)
 
 
 async def asummarize_conversation(

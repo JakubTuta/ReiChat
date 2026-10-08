@@ -142,7 +142,7 @@ async function saveMemory(memory: { num_ctx?: number | null, memory_mode?: 'trim
   }
 }
 
-function giveMoreMemory(tokens: number) {
+function setMemorySize(tokens: number) {
   saveMemory({ num_ctx: tokens })
 }
 
@@ -623,7 +623,8 @@ watch(waitingForResponse, (newValue) => {
             @request-save-edit="handleRequestSaveEdit"
             @cancel-edit="handleCancelEdit"
             @switch-branch="handleSwitchBranch"
-            @more-memory="giveMoreMemory"
+            @more-memory="setMemorySize"
+            @less-memory="setMemorySize"
             @summarize-memory="switchToSummarize"
             @continue-fresh="continueInFreshChat"
           />

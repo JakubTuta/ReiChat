@@ -440,6 +440,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return
 
             await persist(full_response)
+            if context_report is not None:
+                # Asked after the reply, when Ollama has actually loaded the
+                # model at this context size.
+                context_report["gpu_share"] = await sync_to_async(
+                    functions.get_gpu_share, thread_sensitive=False
+                )(ai_model.model, ai_model_parameters)
             done_payload = {"message": full_response, "done": True}
             if (final_stats := finalize_stats()) is not None:
                 done_payload["stats"] = final_stats

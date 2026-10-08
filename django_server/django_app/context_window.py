@@ -135,6 +135,9 @@ class ContextReport(typing.TypedDict):
     preset: str | None
     dropped: int
     summarized: bool
+    # Fraction of the model in GPU memory after this reply; None when no
+    # GPU is involved. See functions.get_gpu_share.
+    gpu_share: typing.NotRequired[float | None]
 
 
 SUMMARY_INSTRUCTIONS = (

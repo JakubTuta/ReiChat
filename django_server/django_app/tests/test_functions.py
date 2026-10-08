@@ -374,3 +374,32 @@ async def test_astream_tool_response_streams_preamble_text_before_a_tool_call(to
         "It's 9.",
     ]
     assert fake_llm.stream_calls == 2
+
+
+def test_gpu_share_is_none_for_cpu_only_containers(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from container.ContainerManager import ContainerManager
+
+    container = MagicMock(status="running", attrs={"Config": {"Labels": {"reichat.gpu": "false"}}})
+    monkeypatch.setattr(ContainerManager, "_client", MagicMock())
+    monkeypatch.setattr(ContainerManager, "get_container", lambda self, name: container)
+
+    assert functions.get_gpu_share("llama3.1", "8b") is None
+
+
+def test_gpu_share_reads_the_loaded_model_from_ps(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from container.ContainerManager import ContainerManager
+
+    container = MagicMock(status="running", attrs={"Config": {"Labels": {"reichat.gpu": "true"}}})
+    monkeypatch.setattr(ContainerManager, "_client", MagicMock())
+    monkeypatch.setattr(ContainerManager, "get_container", lambda self, name: container)
+    monkeypatch.setattr(ContainerManager, "base_url_for", lambda self, c: "http://o")
+    monkeypatch.setattr(
+        functions.ollama_api, "running_models",
+        lambda base_url: [{"name": "llama3.1:8b", "size": 1000, "size_vram": 750, "context_length": 8192}],
+    )
+
+    assert functions.get_gpu_share("llama3.1", "8b") == 0.75

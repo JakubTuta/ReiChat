@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { availablePresets, formatPages, memoryLevel, memoryPercent, nextPreset } from '~/utils/memory'
+import { availablePresets, formatPages, memoryLevel, memoryPercent, nextPreset, previousPreset, spillsOutOfGpu } from '~/utils/memory'
 
 describe('memory helpers', () => {
   it('describes sizes in pages, never tokens', () => {
@@ -26,6 +26,18 @@ describe('memory helpers', () => {
     expect(nextPreset(8192, 131072)?.id).toBe('long')
     expect(nextPreset(8192, 8192)).toBeNull()
     expect(nextPreset(32768, null)).toBeNull()
+  })
+
+  it('suggests a smaller preset only when one exists', () => {
+    expect(previousPreset(16384)?.id).toBe('standard')
+    expect(previousPreset(4096)).toBeNull()
+  })
+
+  it('flags GPU spill only when a GPU is actually involved', () => {
+    expect(spillsOutOfGpu({ gpu_share: 0.6 })).toBe(true)
+    expect(spillsOutOfGpu({ gpu_share: 1 })).toBe(false)
+    expect(spillsOutOfGpu({ gpu_share: null })).toBe(false)
+    expect(spillsOutOfGpu({})).toBe(false)
   })
 
   it('hides presets bigger than the model can use', () => {
