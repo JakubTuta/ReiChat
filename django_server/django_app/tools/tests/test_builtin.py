@@ -46,6 +46,25 @@ def test_evaluate_arithmetic_rejects_booleans_as_numbers():
         evaluate_arithmetic("True + 1")
 
 
+@pytest.mark.parametrize("expression", ["9**9**9**9", "2**100000", "(10**1000)**1000", "-(7**99999)"])
+def test_evaluate_arithmetic_rejects_huge_integer_results_without_computing_them(expression):
+    with pytest.raises(UnsafeExpressionError):
+        evaluate_arithmetic(expression)
+
+
+def test_evaluate_arithmetic_still_allows_large_but_reasonable_powers():
+    assert evaluate_arithmetic("2 ** 64") == 18446744073709551616
+
+
+def test_evaluate_arithmetic_rejects_overlong_expression():
+    with pytest.raises(UnsafeExpressionError):
+        evaluate_arithmetic("1+" * 200 + "1")
+
+
+def test_calculator_tool_reports_float_overflow_as_error():
+    assert calculator.invoke({"expression": "10.0 ** 400"}).startswith("Error:")
+
+
 def test_calculator_tool_returns_string_result():
     assert calculator.invoke({"expression": "2 + 2"}) == "4"
 

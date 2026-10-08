@@ -30,11 +30,36 @@ class UnsafeExpressionError(ValueError):
     pass
 
 
+# Python ints are arbitrary-precision, so "9**9**9**9" doesn't overflow — it
+# just computes for hours in a thread that can't be cancelled, eating memory
+# the whole time. The expression comes from model output (or a
+# prompt-injected document), so integer results are capped well past
+# anything a calculator answer needs.
+MAX_EXPRESSION_LENGTH = 300
+MAX_RESULT_BITS = 4096
+
+
+def _check_magnitude(value: float) -> float:
+    if isinstance(value, int) and value.bit_length() > MAX_RESULT_BITS:
+        raise UnsafeExpressionError("Result is too large.")
+    return value
+
+
+def _safe_pow(base: float, exponent: float) -> float:
+    if isinstance(base, int) and isinstance(exponent, int) and abs(base) > 1:
+        if exponent * base.bit_length() > MAX_RESULT_BITS:
+            raise UnsafeExpressionError("Result is too large.")
+    return operator.pow(base, exponent)
+
+
 def _safe_eval(node: ast.AST) -> float:
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-        return node.value
+        return _check_magnitude(node.value)
     if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_BIN_OPERATORS:
-        return _SAFE_BIN_OPERATORS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        left, right = _safe_eval(node.left), _safe_eval(node.right)
+        if isinstance(node.op, ast.Pow):
+            return _check_magnitude(_safe_pow(left, right))
+        return _check_magnitude(_SAFE_BIN_OPERATORS[type(node.op)](left, right))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_UNARY_OPERATORS:
         return _SAFE_UNARY_OPERATORS[type(node.op)](_safe_eval(node.operand))
 
@@ -47,6 +72,9 @@ def evaluate_arithmetic(expression: str) -> float:
     itself, so there's no path to arbitrary code execution regardless of
     what the model (or a prompt-injected document) puts in `expression`.
     """
+    if len(expression) > MAX_EXPRESSION_LENGTH:
+        raise UnsafeExpressionError(f"Expression is longer than {MAX_EXPRESSION_LENGTH} characters.")
+
     tree = ast.parse(expression, mode="eval")
 
     return _safe_eval(tree.body)
@@ -60,7 +88,7 @@ def calculator(expression: str) -> str:
     """
     try:
         result = evaluate_arithmetic(expression)
-    except (UnsafeExpressionError, SyntaxError, ZeroDivisionError, TypeError) as e:
+    except (UnsafeExpressionError, SyntaxError, ZeroDivisionError, TypeError, OverflowError) as e:
         return f"Error: could not evaluate {expression!r}: {e}"
 
     return str(result)
