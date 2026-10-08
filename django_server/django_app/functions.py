@@ -647,6 +647,52 @@ async def asummarize_conversation(
     return response.text.strip()
 
 
+TITLE_PROMPT = (
+    "Write a short title (3 to 6 words) for a conversation that starts like this. "
+    "Use the conversation's language. Reply with the title only — no quotes, no punctuation at the end."
+)
+MAX_TITLE_LENGTH = 60
+
+
+def clean_title(raw: str) -> str:
+    title = raw.strip().splitlines()[0] if raw.strip() else ""
+    title = title.strip().strip("\"'`*#").strip()
+    title = title.removeprefix("Title:").strip().rstrip(".")
+    return title[:MAX_TITLE_LENGTH].strip()
+
+
+async def agenerate_title(
+    model: models.AIModel, parameters: str, user_prompt: str, answer: str, reasoning: bool | str | None
+) -> str:
+    url_info = await sync_to_async(get_ollama_url, thread_sensitive=False)(model.model, parameters)
+    if url_info is None:
+        return ""
+
+    base_url, full_model_string = url_info
+    # Thinking would cost far more than the title itself; ask models that
+    # can switch it off to do so (reasoning=False), leave the rest alone.
+    llm = _build_chat_ollama(
+        base_url,
+        full_model_string,
+        temperature=0.3,
+        num_predict=24,
+        reasoning=False if reasoning is not None else None,
+    )
+    excerpt = f"User: {user_prompt[:1000]}\n\nAssistant: {answer[:1000]}"
+    response = await llm.ainvoke([{"role": "user", "content": f"{TITLE_PROMPT}\n\n{excerpt}"}])
+
+    return clean_title(response.text)
+
+
+def save_title_if_untitled(chat_history: models.ChatHistory, title: str) -> bool:
+    """Only replaces the default title — never one the user typed, even if
+    they renamed the chat while the title was being generated."""
+    updated = models.ChatHistory.objects.filter(
+        id=chat_history.id, title=models.DEFAULT_CHAT_TITLE
+    ).update(title=title)
+    return updated == 1
+
+
 def save_memory_summary(chat_history: models.ChatHistory, summary: str, until_message_id: int) -> None:
     chat_history.memory_summary = summary
     chat_history.memory_summary_until_id = until_message_id

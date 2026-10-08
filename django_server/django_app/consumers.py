@@ -26,12 +26,14 @@ TOOL_APPROVAL_TIMEOUT_SECONDS = 300
 
 class ChatConsumer(AsyncWebsocketConsumer):
     generation_task: asyncio.Task | None = None
+    title_task: asyncio.Task | None = None
     pending_approvals: dict[str, asyncio.Future[bool]]
 
     async def connect(self):
         self.room_name = self.scope["url_route"]["kwargs"]["chat_id"]
         self.room_group_name = f"chat_{self.room_name}"
         self.generation_task = None
+        self.title_task = None
         self.pending_approvals = {}
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)  # type: ignore
@@ -42,6 +44,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # it keep streaming into a socket nothing is reading from anymore.
         if self._is_generating():
             self.generation_task.cancel()  # type: ignore[union-attr]
+        if self.title_task is not None and not self.title_task.done():
+            self.title_task.cancel()
 
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)  # type: ignore
 
@@ -501,6 +505,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 done_payload["citations"] = citations
             await self.send(text_data=json.dumps(done_payload))
 
+            # Its own task, after the reply is out: a title is cosmetic and
+            # must neither delay the answer nor keep _is_generating() true.
+            is_first_exchange = (
+                not history_messages and regenerate_from_user_message is None and not is_edit_resend
+            )
+            if is_first_exchange and chat_history.title == models.DEFAULT_CHAT_TITLE:
+                self.title_task = asyncio.create_task(
+                    self._name_chat(ai_model, ai_model_parameters, chat_history, user_prompt, full_response, reasoning)
+                )
+
         except asyncio.CancelledError:
             logger.info("Generation stopped by client for chat %s", self.room_name)
 
@@ -600,6 +614,25 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "summarized": bool(memory_summary),
         }
         return system_prompt(), fit.history, report
+
+    async def _name_chat(
+        self,
+        ai_model: models.AIModel,
+        parameters: str,
+        chat_history: models.ChatHistory,
+        user_prompt: str,
+        answer: str,
+        reasoning: bool | str | None,
+    ) -> None:
+        try:
+            title = await functions.agenerate_title(ai_model, parameters, user_prompt, answer, reasoning)
+            if title and await database_sync_to_async(functions.save_title_if_untitled)(chat_history, title):
+                await self.send(text_data=json.dumps({"chat_title": title}))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # Only a cosmetic default title is lost — the chat itself is fine.
+            logger.warning("Could not generate a title for chat %s: %s", chat_history.id, e)
 
     async def _send_notice(self, notice: str) -> None:
         await self.send(text_data=json.dumps({"notice": notice, "done": False}))

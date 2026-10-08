@@ -47,6 +47,7 @@ beforeEach(() => {
     onReceiveMessage: vi.fn(),
     onError: vi.fn(),
     onNotice: vi.fn(),
+    onChatTitle: vi.fn(),
     onReconnecting: vi.fn(),
     onMaxReconnectFailed: vi.fn(),
   }
@@ -76,6 +77,15 @@ describe('getWebsocket reconnect wrapper', () => {
 
     first.readyState = FakeWebSocket.CLOSED
     expect(wrapper.readyState).toBe(FakeWebSocket.OPEN) // still reading `second`, not `first`
+  })
+
+  it('routes chat_title frames to onChatTitle', () => {
+    getWebsocket(handlers, 'room1', 'http://localhost:8000/')
+
+    instances[0].dispatch('message', { data: JSON.stringify({ chat_title: 'Trip to Rome' }) })
+
+    expect(handlers.onChatTitle).toHaveBeenCalledWith('Trip to Rome')
+    expect(handlers.onReceiveMessage).not.toHaveBeenCalled()
   })
 
   it('routes notice frames to onNotice, not onReceiveMessage', () => {

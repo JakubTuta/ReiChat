@@ -557,3 +557,29 @@ async def test_huge_tool_output_is_cut_down_before_reaching_the_model(tool_test_
 
     assert len(chunks[0]["result"]) < functions.MAX_TOOL_RESULT_CHARS + 100
     assert chunks[0]["result"].endswith("characters]")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('"Planning a Trip to Rome."', "Planning a Trip to Rome"),
+        ("Title: Sourdough basics\nSome extra line", "Sourdough basics"),
+        ("**Fixing a Python bug**", "Fixing a Python bug"),
+        ("", ""),
+    ],
+)
+def test_clean_title(raw, expected):
+    assert functions.clean_title(raw) == expected
+
+
+def test_generated_title_never_replaces_one_the_user_typed():
+    ai_model = models.AIModel.objects.create(name="t", model="title-test-model", index=1)
+    renamed = models.ChatHistory.objects.create(ai_model=ai_model, title="My own name")
+    untitled = models.ChatHistory.objects.create(ai_model=ai_model)
+
+    assert functions.save_title_if_untitled(renamed, "Generated") is False
+    assert functions.save_title_if_untitled(untitled, "Generated") is True
+    renamed.refresh_from_db()
+    untitled.refresh_from_db()
+    assert renamed.title == "My own name"
+    assert untitled.title == "Generated"

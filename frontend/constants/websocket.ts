@@ -82,6 +82,8 @@ export interface WebsocketResponse {
   // A standalone `done: false` frame: generation is paused until the user
   // answers with respondToolApproval.
   tool_approval?: ToolApproval
+  // Sent once, after the first reply in an untitled chat: its generated title.
+  chat_title?: string
 }
 
 export interface WebsocketHandlers {
@@ -91,6 +93,7 @@ export interface WebsocketHandlers {
   onReceiveMessage: (data: WebsocketResponse) => void
   onError?: (message: string) => void
   onNotice?: (notice: string) => void
+  onChatTitle?: (title: string) => void
   onReconnecting?: (attempt: number) => void
   onMaxReconnectFailed?: () => void
 }
@@ -185,6 +188,12 @@ export function getWebsocket(handlers: WebsocketHandlers, roomId: string, baseUR
 
         if (data.notice) {
           handlers.onNotice?.(data.notice)
+
+          return
+        }
+
+        if (data.chat_title) {
+          handlers.onChatTitle?.(data.chat_title)
 
           return
         }

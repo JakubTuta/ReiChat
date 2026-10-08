@@ -109,6 +109,12 @@ export const useChatSocketStore = defineStore('chatSocket', () => {
       resyncHistory()
     },
 
+    onChatTitle: (title: string) => {
+      const chat = chatStore.allChats[activeModel.value]?.find(c => c.id === activeChatId.value)
+      if (chat)
+        chat.title = title
+    },
+
     onNotice: (notice: string) => {
       notices.value = [...notices.value, notice]
     },

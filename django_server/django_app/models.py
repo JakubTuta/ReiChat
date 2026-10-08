@@ -71,9 +71,12 @@ class PromptTemplate(models.Model):
         return self.name
 
 
+DEFAULT_CHAT_TITLE = "New chat"
+
+
 class ChatHistory(models.Model):
     ai_model = models.ForeignKey(AIModel, on_delete=models.CASCADE)
-    title = models.TextField(default="New chat")
+    title = models.TextField(default=DEFAULT_CHAT_TITLE)
     last_update_time = models.DateTimeField(auto_now=True, db_index=True)
     persona = models.ForeignKey(
         Persona, null=True, blank=True, on_delete=models.SET_NULL, related_name="chats"

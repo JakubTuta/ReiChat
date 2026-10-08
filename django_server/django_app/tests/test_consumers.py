@@ -1038,3 +1038,38 @@ async def test_tool_approval_round_trip_over_the_socket(tools_chat, monkeypatch)
     assert decisions == [False]
     await communicator.disconnect()
 
+
+async def test_first_reply_in_an_untitled_chat_gets_a_generated_title(chat, monkeypatch):
+    chat.title = models.DEFAULT_CHAT_TITLE
+    await database_sync_to_async(chat.save)(update_fields=["title"])
+
+    async def _fake_title(model, parameters, user_prompt, answer, reasoning):
+        return "Greeting the assistant"
+
+    monkeypatch.setattr(functions, "agenerate_title", _fake_title)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream({}))
+
+    communicator = WebsocketCommunicator(_application(), f"/ws/chat/{chat.id}/")
+    assert (await communicator.connect())[0]
+    await communicator.send_json_to({"message": "Hi", "ai_model": "llama3.1", "ai_model_parameters": "8b"})
+
+    while not (await communicator.receive_json_from(timeout=5)).get("done"):
+        pass
+    assert await communicator.receive_json_from(timeout=5) == {"chat_title": "Greeting the assistant"}
+    await communicator.disconnect()
+
+    await database_sync_to_async(chat.refresh_from_db)()
+    assert chat.title == "Greeting the assistant"
+
+
+async def test_titled_chats_are_not_renamed(chat, monkeypatch):
+    async def _must_not_title(*args):
+        raise AssertionError("titled again")
+
+    monkeypatch.setattr(functions, "agenerate_title", _must_not_title)
+    monkeypatch.setattr(functions, "astream_bot_response", _capturing_astream({}))
+
+    frames = await _send_and_collect(chat)
+
+    assert frames[-1]["done"] is True
+
