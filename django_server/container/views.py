@@ -5,6 +5,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django_app import ollama_api
 from django_app.models import AIModel, AIModelVersion
 
 from . import hardware, install
@@ -89,7 +90,15 @@ class DiskUsage(APIView):
         for container in containers:
             model = container["environment"].get("model")
             parameters = container["environment"].get("parameters")
-            size_bytes = versions_by_key.get((model, parameters))
+            # The real size on disk when the container can be asked (a
+            # running one), the registry's advertised size otherwise.
+            size_bytes = None
+            if container["status"] in ("running", "incomplete") and model and parameters:
+                base_url = docker_client.get_ollama_base_url(model, parameters)
+                sizes = ollama_api.installed_model_sizes(base_url) if base_url else None
+                size_bytes = (sizes or {}).get(f"{model}:{parameters}")
+            if size_bytes is None:
+                size_bytes = versions_by_key.get((model, parameters))
             if size_bytes:
                 total_bytes += size_bytes
 
@@ -101,6 +110,77 @@ class DiskUsage(APIView):
             })
 
         return Response({"total_bytes": total_bytes, "models": entries}, status=status.HTTP_200_OK)
+
+
+class Runtime(APIView):
+    """What each running model container has loaded in memory right now."""
+
+    def get(self, request) -> Response:
+        docker_client = ContainerManager()
+
+        if not docker_client.is_connected() and not docker_client.connect_to_docker():
+            return Response({"error": "Error connecting to Docker"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        assert docker_client.client is not None
+        loaded = []
+        for container in docker_client.client.containers.list(filters={"status": "running"}):
+            if not ContainerManager.is_managed_container(container):
+                continue
+            base_url = docker_client.base_url_for(container)
+            for entry in (ollama_api.running_models(base_url) if base_url else None) or []:
+                loaded.append({
+                    "container": container.name,
+                    "model": entry["name"],
+                    "size_bytes": entry["size"],
+                    "vram_bytes": entry["size_vram"],
+                    "context_length": entry["context_length"],
+                    "expires_at": entry["expires_at"],
+                })
+
+        return Response({"loaded": loaded}, status=status.HTTP_200_OK)
+
+
+class ContainerUnload(APIView):
+    def post(self, request, model) -> Response:
+        parameters = request.query_params.get("parameters")
+        if parameters is None:
+            return Response({"error": "Invalid request: missing 'parameters' query param"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        docker_client = ContainerManager()
+        base_url = docker_client.get_ollama_base_url(model, parameters)
+        if base_url is None:
+            return Response({"error": "That model isn't running."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not ollama_api.unload_model(base_url, f"{model}:{parameters}"):
+            return Response({"error": "Ollama didn't respond — try again in a moment."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response({"status": "Model unloaded"}, status=status.HTTP_200_OK)
+
+
+class ContainerUpdate(APIView):
+    def post(self, request, model) -> Response:
+        parameters = request.query_params.get("parameters")
+        if parameters is None:
+            return Response({"error": "Invalid request: missing 'parameters' query param"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if ContainerManager().get_container(ContainerManager.container_name(model, parameters)) is None:
+            return Response({"error": "That model isn't installed."}, status=status.HTTP_404_NOT_FOUND)
+
+        install.start_model_update(model, parameters)
+        return Response({"status": "Checking for updates"}, status=status.HTTP_202_ACCEPTED)
+
+
+class OllamaUpdate(APIView):
+    def post(self, request) -> Response:
+        docker_client = ContainerManager()
+        if not docker_client.is_connected() and not docker_client.connect_to_docker():
+            return Response({"error": "Error connecting to Docker"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        install.start_ollama_update()
+        return Response({"status": "Ollama update started"}, status=status.HTTP_202_ACCEPTED)
 
 
 class OllamaImage(APIView):

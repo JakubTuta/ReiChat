@@ -214,3 +214,28 @@ def test_metadata_prefers_labels_over_env():
     container = _fake_container(labels=_managed_labels(port="11500"), env=["port=99"])
 
     assert ContainerManager.get_container_metadata(container, "port") == "11500"
+
+
+def test_recreate_keeps_name_port_labels_and_weights_volume(connected_client):
+    old = _fake_container(labels={**_managed_labels(port="11500"), "reichat.gpu": "true"})
+    old.attrs["Mounts"] = [{"Name": "reichat-ollama-llama3.1_8b"}]
+    connected_client.containers.create.return_value = _fake_container(status="created", container_id="new")
+
+    ContainerManager().recreate_on_current_image(old)
+
+    old.remove.assert_called_once_with(force=True)
+    kwargs = connected_client.containers.create.call_args.kwargs
+    assert kwargs["name"] == "llama3.1_8b"
+    assert kwargs["ports"] == {"11434/tcp": ("127.0.0.1", 11500)}
+    assert kwargs["volumes"] == {"reichat-ollama-llama3.1_8b": {"bind": "/root/.ollama", "mode": "rw"}}
+    assert kwargs["labels"]["reichat.model"] == "llama3.1"
+
+
+def test_recreate_refuses_containers_whose_weights_would_be_lost(connected_client):
+    legacy = _fake_container(labels=_managed_labels())
+    legacy.attrs["Mounts"] = []
+
+    with pytest.raises(ContainerError, match="downloading the model again"):
+        ContainerManager().recreate_on_current_image(legacy)
+
+    legacy.remove.assert_not_called()

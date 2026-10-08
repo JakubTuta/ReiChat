@@ -55,7 +55,7 @@ def test_running_models_normalizes_ps_output(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResponse(payload))
 
     assert ollama_api.running_models("http://o") == [
-        {"name": "qwen2.5:0.5b", "size": 1000, "size_vram": 600, "context_length": 8192}
+        {"name": "qwen2.5:0.5b", "size": 1000, "size_vram": 600, "context_length": 8192, "expires_at": None}
     ]
 
 

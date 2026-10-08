@@ -80,11 +80,41 @@ def thinking_controls(show_info: dict[str, typing.Any]) -> ThinkingControls | No
     return {"values": values, "default": default}
 
 
+def installed_model_sizes(base_url: str) -> dict[str, int] | None:
+    """name:tag -> size on disk in bytes, per /api/tags."""
+    try:
+        response = requests.get(f"{base_url}/api/tags", timeout=_REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        listed = response.json().get("models") or []
+    except (requests.exceptions.RequestException, ValueError, AttributeError) as e:
+        logger.warning("Could not list installed models at %s: %s", base_url, e)
+        return None
+
+    return {str(entry.get("name") or entry.get("model")): int(entry.get("size") or 0) for entry in listed}
+
+
+def unload_model(base_url: str, model_string: str) -> bool:
+    """Frees the memory a loaded model holds right away, instead of after
+    Ollama's 5-minute keep-alive. True when Ollama confirmed it."""
+    try:
+        response = requests.post(
+            f"{base_url}/api/generate",
+            json={"model": model_string, "keep_alive": 0},
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.warning("Could not unload %s at %s: %s", model_string, base_url, e)
+        return False
+    return True
+
+
 class RunningModel(typing.TypedDict):
     name: str
     size: int
     size_vram: int
     context_length: int | None
+    expires_at: str | None
 
 
 def running_models(base_url: str) -> list[RunningModel] | None:
@@ -104,6 +134,7 @@ def running_models(base_url: str) -> list[RunningModel] | None:
             "size": int(entry.get("size") or 0),
             "size_vram": int(entry.get("size_vram") or 0),
             "context_length": entry.get("context_length"),
+            "expires_at": entry.get("expires_at"),
         }
         for entry in listed
     ]

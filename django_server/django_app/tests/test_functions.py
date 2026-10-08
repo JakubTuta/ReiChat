@@ -401,7 +401,9 @@ def test_gpu_share_reads_the_loaded_model_from_ps(monkeypatch):
     monkeypatch.setattr(ContainerManager, "base_url_for", lambda self, c: "http://o")
     monkeypatch.setattr(
         functions.ollama_api, "running_models",
-        lambda base_url: [{"name": "llama3.1:8b", "size": 1000, "size_vram": 750, "context_length": 8192}],
+        lambda base_url: [
+            {"name": "llama3.1:8b", "size": 1000, "size_vram": 750, "context_length": 8192, "expires_at": None}
+        ],
     )
 
     assert functions.get_gpu_share("llama3.1", "8b") == 0.75

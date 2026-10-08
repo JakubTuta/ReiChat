@@ -99,3 +99,52 @@ def test_get_ollama_url_reports_download_in_progress(monkeypatch):
             functions.get_ollama_url("busy-model", "1b")
     finally:
         progress_state.clear_progress("busy-model_1b")
+
+
+def test_ollama_update_is_a_no_op_when_the_image_did_not_change(monkeypatch):
+    fake = MagicMock(spec=ContainerManager)
+    fake.is_connected.return_value = True
+    fake.image_id.return_value = "sha256:same"
+    monkeypatch.setattr(install, "ContainerManager", MagicMock(return_value=fake))
+    infos = []
+    monkeypatch.setattr(install, "_report_info", infos.append)
+    monkeypatch.setattr(install, "_progress", lambda *a: None)
+    monkeypatch.setattr(install, "_broadcast_snapshot", lambda: None)
+    monkeypatch.setattr(install, "close_old_connections", lambda: None)
+    progress_state.try_claim(install.UPDATE_KEY, "x")
+
+    install._ollama_update_worker()
+
+    assert infos == ["Ollama is already up to date."]
+    fake.recreate_on_current_image.assert_not_called()
+    assert not progress_state.is_in_progress(install.UPDATE_KEY)
+
+
+def test_ollama_update_moves_every_model_and_reports_the_ones_it_could_not(monkeypatch):
+    fake = MagicMock(spec=ContainerManager)
+    fake.is_connected.return_value = True
+    fake.image_id.side_effect = ["sha256:old", "sha256:new"]
+    good, legacy = MagicMock(), MagicMock()
+    good.name, legacy.name = "llama3.1_8b", "old_1b"
+    fake.client = MagicMock()
+    fake.client.containers.list.return_value = [good, legacy]
+
+    def _recreate(container):
+        if container is legacy:
+            raise ContainerError("no volume")
+
+    fake.recreate_on_current_image.side_effect = _recreate
+    manager_cls = MagicMock(return_value=fake)
+    manager_cls.is_managed_container = lambda c: True
+    monkeypatch.setattr(install, "ContainerManager", manager_cls)
+    infos = []
+    monkeypatch.setattr(install, "_report_info", infos.append)
+    monkeypatch.setattr(install, "_progress", lambda *a: None)
+    monkeypatch.setattr(install, "_broadcast_snapshot", lambda: None)
+    monkeypatch.setattr(install, "close_old_connections", lambda: None)
+    progress_state.try_claim(install.UPDATE_KEY, "x")
+
+    install._ollama_update_worker()
+
+    assert fake.recreate_on_current_image.call_count == 2
+    assert "old_1b" in infos[0]

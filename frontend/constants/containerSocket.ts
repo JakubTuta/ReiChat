@@ -25,6 +25,7 @@ export type ContainerSocketMessageType
     | 'model_pull_progress'
     | 'scrape_progress'
     | 'container_update'
+    | 'ollama_update'
 
 export interface ContainerSocketMessage {
   type: ContainerSocketMessageType
@@ -38,6 +39,9 @@ export interface ContainerSocketMessage {
   percent?: number
   detail?: string
   error?: string
+  // container_update: a plain-language success message (e.g. after an
+  // Ollama update) rather than an error.
+  info?: string
   // scrape_progress fields
   running?: boolean
   total?: number | null

@@ -2,11 +2,12 @@
 import type { IAIModel, IAIModelVersion } from '~/models/aiModel'
 import type { FitLabel } from '~/models/hardware'
 import { computeFitLabel } from '~/models/hardware'
+import { OLLAMA_UPDATE_KEY } from '~/stores/containerStore'
 
 const router = useRouter()
 
 const containerStore = useContainerStore()
-const { containers, loadingOperation, pullProgress, scrapeProgress } = storeToRefs(containerStore)
+const { containers, loadingOperation, pullProgress, scrapeProgress, loadedModels } = storeToRefs(containerStore)
 
 const chatStore = useChatStore()
 const { aiModels, loading } = storeToRefs(chatStore)
@@ -21,6 +22,32 @@ const search = ref('')
 const sort = ref('popularityDecreasing')
 const filter = ref('all')
 const selectedVersions = ref<Record<string, IAIModelVersion | null>>({})
+
+const ollamaUpdateProgress = computed(() => pullProgress.value[OLLAMA_UPDATE_KEY] ?? null)
+
+let runtimeTimer: ReturnType<typeof setInterval> | null = null
+const RUNTIME_POLL_MS = 10_000
+
+function loadedInfo(model: IAIModel) {
+  const version = selectedVersions.value[model.model]
+  if (!version)
+    return null
+
+  return loadedModels.value.find(m => m.model === `${model.model}:${version.parameters}`) ?? null
+}
+
+function gpuShareLabel(loaded: { size_bytes: number, vram_bytes: number }): string {
+  if (!loaded.size_bytes || hardware.value.gpu_available === false)
+    return 'on CPU'
+
+  const percent = Math.round((loaded.vram_bytes / loaded.size_bytes) * 100)
+  if (percent >= 99)
+    return 'fully on GPU'
+  if (percent <= 0)
+    return 'on CPU'
+
+  return `${percent}% on GPU`
+}
 // cmd.exe uses `^` for line continuation, but PowerShell — the default
 // shell on Windows 11 — uses a backtick, and `^` just fails there. A plain
 // "Windows commands" checkbox defaulting to true assumed cmd unconditionally
@@ -70,11 +97,16 @@ onMounted(async () => {
 
   hardwareStore.fetchHardware()
   hardwareStore.fetchDiskUsage()
+
+  containerStore.fetchRuntime()
+  runtimeTimer = setInterval(() => containerStore.fetchRuntime(), RUNTIME_POLL_MS)
 })
 
 onUnmounted(() => {
   containerStore.disconnectSocket()
   containerStore.stopPolling()
+  if (runtimeTimer !== null)
+    clearInterval(runtimeTimer)
 })
 
 watch(
@@ -248,6 +280,16 @@ const STATUS_META: Record<string, { dot: string, label: string }> = {
 
 function statusMeta(status: string) {
   return STATUS_META[status] ?? STATUS_META.not_found
+}
+
+// Embedding models never chat — "ready to chat" would send people looking
+// for them in the chat picker.
+function statusLabel(model: IAIModel): string {
+  const status = getContainerStatus(model)
+  if (model.is_embedding && status === 'running')
+    return 'ready · used for searching your files'
+
+  return statusMeta(status).label
 }
 
 const FIT_LABEL: Record<FitLabel, string> = {
@@ -592,14 +634,29 @@ const catalogueButtonLabel = computed(() => {
         </div>
       </div>
 
-      <v-btn
-        color="mint-btn"
-        variant="flat"
-        rounded="lg"
-        @click="openPullModelsDialog"
-      >
-        {{ catalogueButtonLabel }}
-      </v-btn>
+      <div class="models-header-actions">
+        <v-btn
+          variant="outlined"
+          rounded="lg"
+          :loading="!!ollamaUpdateProgress"
+          title="Download the newest Ollama and move your models onto it"
+          @click="containerStore.updateOllama()"
+        >
+          Update Ollama
+          <template #loader>
+            {{ ollamaUpdateProgress?.detail || 'Updating…' }}
+          </template>
+        </v-btn>
+
+        <v-btn
+          color="mint-btn"
+          variant="flat"
+          rounded="lg"
+          @click="openPullModelsDialog"
+        >
+          {{ catalogueButtonLabel }}
+        </v-btn>
+      </div>
     </div>
 
     <div
@@ -747,7 +804,7 @@ const catalogueButtonLabel = computed(() => {
               :style="{'backgroundColor': `var(--color-${statusMeta(getContainerStatus(model)).dot})`}"
             />
 
-            <span class="status-label">{{ statusMeta(getContainerStatus(model)).label }}</span>
+            <span class="status-label">{{ statusLabel(model) }}</span>
 
             <template v-if="fitFor(model) && fitFor(model)!.label !== 'unknown'">
               <span class="status-sep">·</span>
@@ -767,6 +824,25 @@ const catalogueButtonLabel = computed(() => {
                 </v-tooltip>
               </span>
             </template>
+          </div>
+
+          <div
+            v-if="loadedInfo(model)"
+            class="loaded-line"
+          >
+            <span>
+              In memory: {{ formatBytes(loadedInfo(model)!.size_bytes) }} · {{ gpuShareLabel(loadedInfo(model)!) }}
+            </span>
+
+            <button
+              type="button"
+              class="loaded-free"
+              title="Unload it now instead of waiting a few idle minutes"
+              @click="containerStore.unloadModel({'model': model.model,
+                                                  'parameters': selectedVersions[model.model]!.parameters})"
+            >
+              Free memory
+            </button>
           </div>
 
           <template v-if="getModelPullProgress(model)">
@@ -806,6 +882,17 @@ const catalogueButtonLabel = computed(() => {
               @click="getPrimaryAction(model).handler()"
             >
               {{ getPrimaryAction(model).label }}
+            </v-btn>
+
+            <v-btn
+              v-if="getContainerStatus(model) === 'running' && !getModelPullProgress(model)"
+              variant="text"
+              size="small"
+              title="Download a newer version of this model if there is one"
+              @click="containerStore.updateModel({'model': model.model,
+                                                  'parameters': selectedVersions[model.model]!.parameters})"
+            >
+              Check for update
             </v-btn>
 
             <v-btn
@@ -926,6 +1013,31 @@ const catalogueButtonLabel = computed(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+.models-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.loaded-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 10px;
+  font-size: 12px;
+  color: var(--color-mint-deep);
+}
+
+.loaded-free {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-ink-3);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .cpu-hint {

@@ -10,6 +10,18 @@ export interface Container {
   environment: any
 }
 
+// A model Ollama currently holds in memory (GET /docker/runtime/).
+export interface LoadedModel {
+  container: string
+  model: string
+  size_bytes: number
+  vram_bytes: number
+  context_length: number | null
+  expires_at: string | null
+}
+
+export const OLLAMA_UPDATE_KEY = 'ollama-update'
+
 export const useContainerStore = defineStore('container', () => {
   const apiStore = useApiStore()
   const snackbarStore = useSnackbarStore()
@@ -18,6 +30,7 @@ export const useContainerStore = defineStore('container', () => {
   const containers = ref<Container[]>([])
   const loadingOperation = ref<string | null>(null)
   const pullProgress = ref<Record<string, PullProgressInfo>>({})
+  const loadedModels = ref<LoadedModel[]>([])
   const scrapeProgress = ref<ScrapeProgressInfo>({
     running: false,
     total: null,
@@ -95,6 +108,7 @@ export const useContainerStore = defineStore('container', () => {
 
           case 'image_pull_progress':
           case 'model_pull_progress':
+          case 'ollama_update':
             if (data.container) {
               pullProgress.value = {
                 ...pullProgress.value,
@@ -122,8 +136,10 @@ export const useContainerStore = defineStore('container', () => {
 
           case 'container_update':
             if (data.error && data.container) {
-              snackbarStore.showSnackbarError(`Container error: ${data.error}`)
+              snackbarStore.showSnackbarError(data.error)
             }
+            if (data.info)
+              snackbarStore.showSnackbarSuccess(data.info)
             // Snapshot thread will push updated container list shortly; no manual patch needed
             break
         }
@@ -214,6 +230,52 @@ export const useContainerStore = defineStore('container', () => {
     }
   }
 
+  const fetchRuntime = async () => {
+    try {
+      const response = await api.value.get('/docker/runtime/')
+      if (response.status === 200)
+        loadedModels.value = response.data.loaded
+    }
+    catch (error: any) {
+      // Informational only; the models list itself still works.
+      console.error(error)
+    }
+  }
+
+  const unloadModel = async (aiModel: { model: string, parameters: string }) => {
+    try {
+      await api.value.post(`/docker/container/${aiModel.model}/unload?parameters=${aiModel.parameters}`, {})
+      snackbarStore.showSnackbarSuccess('Memory freed — the model loads again on your next message.')
+      await fetchRuntime()
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not free the model\'s memory.')
+    }
+  }
+
+  const updateModel = async (aiModel: { model: string, parameters: string }) => {
+    try {
+      await api.value.post(`/docker/container/${aiModel.model}/update?parameters=${aiModel.parameters}`, {})
+      snackbarStore.showSnackbarInfo('Checking for a newer version — only changed parts are downloaded.')
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not check for updates.')
+    }
+  }
+
+  const updateOllama = async () => {
+    try {
+      await api.value.post('/docker/ollama-update/', {})
+      snackbarStore.showSnackbarInfo('Updating Ollama — your models keep their downloaded files.')
+    }
+    catch (error: any) {
+      console.error(error)
+      snackbarStore.showSnackbarError(error.response?.data?.error || 'Could not start the Ollama update.')
+    }
+  }
+
   const stopContainer = async (aiModel: { model: string, parameters: string }) => {
     const url = `/docker/container/${aiModel.model}?parameters=${aiModel.parameters}&method=stop`
     const operationKey = `stop_${aiModel.model}_${aiModel.parameters}`
@@ -265,7 +327,12 @@ export const useContainerStore = defineStore('container', () => {
     loadingOperation,
     pullProgress,
     scrapeProgress,
+    loadedModels,
     resetState,
+    fetchRuntime,
+    unloadModel,
+    updateModel,
+    updateOllama,
     checkSystemStatus,
     getUserContainers,
     runContainer,

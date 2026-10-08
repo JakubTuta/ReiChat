@@ -125,5 +125,8 @@ class ContainerStatusConsumer(WebsocketConsumer):
     def scrape_progress(self, event: dict) -> None:
         self._relay(event)
 
+    def ollama_update(self, event: dict) -> None:
+        self._relay(event)
+
     def snapshot(self, event: dict) -> None:
         self._relay(event)

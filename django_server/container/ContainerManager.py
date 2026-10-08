@@ -368,6 +368,49 @@ class ContainerManager:
         container.reload()
         return container
 
+    def recreate_on_current_image(self, container: Container) -> Container:
+        """Replaces a container with one on the current ollama/ollama image,
+        same name, port, labels and weights volume — how a model moves to a
+        newer Ollama without downloading again. Raises ContainerError."""
+        model = ContainerManager.get_container_metadata(container, "model")
+        parameters = ContainerManager.get_container_metadata(container, "parameters")
+        port = ContainerManager.get_container_metadata(container, "port")
+        if not (model and parameters and port and ContainerManager.has_weights_volume(container)):
+            raise ContainerError(
+                f"{container.name} was created before model files were kept separately, so updating it would "
+                "mean downloading the model again. Remove it and create it again to make it updatable."
+            )
+
+        was_running = container.status == ContainerManager.CONTAINER_STATUS["RUNNING"]
+        try:
+            container.remove(force=True)
+        except docker.errors.APIError as e:
+            raise ContainerError(f"Couldn't replace {container.name}: {_docker_error_text(e)}") from e
+
+        with ContainerManager._installed_lock:
+            ContainerManager._installed_ids.discard(container.id or "")
+
+        use_gpu = ContainerManager._labels(container).get(LABEL_GPU) != "false"
+        if ContainerManager._gpu_supported is False:
+            use_gpu = False
+        replacement = self._create_container(container.name or "", model, parameters, int(port), use_gpu)
+        if was_running:
+            self.start_container(replacement)
+        return replacement
+
+    @staticmethod
+    def has_weights_volume(container: Container) -> bool:
+        expected = ContainerManager.volume_name(container.name or "")
+        return any(mount.get("Name") == expected for mount in container.attrs.get("Mounts") or [])
+
+    def image_id(self) -> str | None:
+        if self.client is None:
+            return None
+        try:
+            return self.client.images.get(f"{OLLAMA_IMAGE}:latest").id
+        except docker.errors.DockerException:
+            return None
+
     def gpu_status(self) -> bool | None:
         """True/False once a container start has shown whether GPUs work on
         this host, else whatever existing containers were created with, else

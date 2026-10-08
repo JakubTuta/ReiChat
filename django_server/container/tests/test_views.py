@@ -200,3 +200,54 @@ def test_get_disk_usage_docker_not_connected_returns_500(client, monkeypatch):
     response = client.get("/docker/disk-usage/")
 
     assert response.status_code == 500
+
+
+def test_unload_frees_a_running_model(client, connected_docker, monkeypatch):
+    unloaded = []
+    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", lambda self, m, p: "http://o")
+    monkeypatch.setattr(
+        "container.views.ollama_api.unload_model", lambda base_url, model: unloaded.append(model) or True
+    )
+
+    response = client.post("/docker/container/llama3.1/unload?parameters=8b")
+
+    assert response.status_code == 200
+    assert unloaded == ["llama3.1:8b"]
+
+
+def test_unload_of_a_stopped_model_says_so(client, connected_docker, monkeypatch):
+    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", lambda self, m, p: None)
+
+    response = client.post("/docker/container/llama3.1/unload?parameters=8b")
+
+    assert response.status_code == 404
+
+
+def test_runtime_lists_loaded_models_per_container(client, connected_docker, monkeypatch):
+    container = _existing_container()
+    container.attrs = {"Config": {"Labels": {"reichat.managed": "true"}, "Env": []}}
+    connected_docker.containers.list.return_value = [container]
+    monkeypatch.setattr(ContainerManager, "base_url_for", lambda self, c: "http://o")
+    monkeypatch.setattr(
+        "container.views.ollama_api.running_models",
+        lambda base_url: [{"name": "llama3.1:8b", "size": 100, "size_vram": 80, "context_length": 8192, "expires_at": "t"}],
+    )
+
+    response = client.get("/docker/runtime/")
+
+    assert response.status_code == 200
+    assert response.json()["loaded"] == [{
+        "container": container.name, "model": "llama3.1:8b", "size_bytes": 100, "vram_bytes": 80,
+        "context_length": 8192, "expires_at": "t",
+    }]
+
+
+def test_update_starts_a_re_pull_for_an_installed_model(client, connected_docker, monkeypatch):
+    started = []
+    monkeypatch.setattr(ContainerManager, "get_container", lambda self, name: _existing_container())
+    monkeypatch.setattr("container.views.install.start_model_update", lambda m, p: started.append((m, p)) or True)
+
+    response = client.post("/docker/container/llama3.1/update?parameters=8b")
+
+    assert response.status_code == 202
+    assert started == [("llama3.1", "8b")]
