@@ -10,7 +10,7 @@ from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models.manager import BaseManager
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessageChunk, ToolMessage, message_chunk_to_message
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_ollama import ChatOllama
 
@@ -136,7 +136,7 @@ async def astream_bot_response(
     # in and reads it once the loop finishes.
     try:
         async for chunk in llm.astream(messages):
-            yield chunk.text()
+            yield chunk.text
             if chunk.response_metadata:
                 _record_generation_stats(stats, chunk.response_metadata)
     except httpx.HTTPError as e:
@@ -170,13 +170,16 @@ async def astream_tool_response(
     """Like astream_bot_response, but binds the built-in tool set (plus any
     enabled MCP servers' tools) and runs the tool-call loop: ask the model,
     execute whatever tools it asks for, feed the results back, repeat until
-    it answers without requesting one (or MAX_TOOL_ITERATIONS is hit). Only
-    the final answer is token-streamed — a tool-deciding turn has nothing
-    worth streaming until it's complete anyway, so those use ainvoke.
+    it answers without requesting one (or MAX_TOOL_ITERATIONS is hit).
 
-    Yields plain `str` chunks for the final answer and `ToolCallInfo` dicts
-    for each tool call made along the way, in call order — callers
-    distinguish them with isinstance().
+    Every turn is streamed, and its text goes out as it arrives — a turn
+    that turns out to be the final answer must never be thrown away and
+    generated a second time (that used to double every tools-enabled reply
+    and showed nothing until the first, discarded pass finished).
+
+    Yields plain `str` chunks of text and `ToolCallInfo` dicts for each tool
+    call made along the way, in call order — callers distinguish them with
+    isinstance().
     """
     url_info = await sync_to_async(get_ollama_url, thread_sensitive=False)(
         model.model, parameters
@@ -221,15 +224,19 @@ async def astream_tool_response(
 
     try:
         for _ in range(MAX_TOOL_ITERATIONS):
-            response = await llm_with_tools.ainvoke(lc_messages)
+            gathered: AIMessageChunk | None = None
 
-            if not response.tool_calls:
-                async for chunk in llm.astream(lc_messages):
-                    yield chunk.text()
-                    if chunk.response_metadata:
-                        _record_generation_stats(stats, chunk.response_metadata)
+            async for chunk in llm_with_tools.astream(lc_messages):
+                gathered = chunk if gathered is None else gathered + chunk
+                if text := chunk.text:
+                    yield text
+                if chunk.response_metadata:
+                    _record_generation_stats(stats, chunk.response_metadata)
+
+            if gathered is None or not gathered.tool_calls:
                 return
 
+            response = message_chunk_to_message(gathered)
             lc_messages.append(response)
 
             for tool_call in response.tool_calls:
@@ -354,7 +361,7 @@ Your response should be valid JSON only, with no other text or explanation."""
     if response.response_metadata:
         _record_generation_stats(stats, response.response_metadata)
 
-    full_response = response.text()
+    full_response = response.text
 
     try:
         parsed_dict = parser.parse(full_response)

@@ -5,7 +5,10 @@ into the actual generation call.
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from langchain_core.messages import AIMessageChunk
 
 from django_app import functions, models
 
@@ -156,39 +159,39 @@ def test_search_messages_includes_inactive_branches():
 # --- astream_tool_response ---------------------------------------------------
 
 
-class _FakeChunk:
-    def __init__(self, text: str):
-        self._text = text
-        self.response_metadata: dict = {}
+def _text_turn(*texts: str) -> list[AIMessageChunk]:
+    return [AIMessageChunk(content=text) for text in texts]
 
-    def text(self) -> str:
-        return self._text
+
+def _tool_turn(*tool_calls: dict) -> list[AIMessageChunk]:
+    return [
+        AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                {"name": call["name"], "args": json.dumps(call["args"]), "id": call["id"], "index": i}
+                for i, call in enumerate(tool_calls)
+            ],
+        )
+    ]
 
 
 class _FakeToolLLM:
-    """Stands in for ChatOllama — bind_tools returns self (its ainvoke is
-    what the tool-decision turns call), astream is what the final,
-    no-more-tool-calls turn streams from.
+    """Stands in for ChatOllama — bind_tools returns self, and each astream()
+    call plays back the next turn's chunks. Counts calls so tests can assert
+    no turn is ever generated twice.
     """
 
-    def __init__(self, invoke_responses: list, stream_chunks: list[str]):
-        self._invoke_responses = list(invoke_responses)
-        self._stream_chunks = stream_chunks
+    def __init__(self, turns: list[list[AIMessageChunk]]):
+        self._turns = list(turns)
+        self.stream_calls = 0
 
     def bind_tools(self, tools):
         return self
 
-    async def ainvoke(self, messages):
-        return self._invoke_responses.pop(0)
-
     async def astream(self, messages):
-        for chunk in self._stream_chunks:
-            yield _FakeChunk(chunk)
-
-
-class _FakeAIMessage:
-    def __init__(self, tool_calls=None):
-        self.tool_calls = tool_calls or []
+        self.stream_calls += 1
+        for chunk in self._turns.pop(0):
+            yield chunk
 
 
 @pytest.fixture
@@ -211,15 +214,11 @@ async def test_astream_tool_response_executes_a_real_tool_then_streams_final_ans
         functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
     )
 
-    fake_llm = _FakeToolLLM(
-        invoke_responses=[
-            _FakeAIMessage(tool_calls=[{"name": "calculator", "args": {"expression": "2+2"}, "id": "call_1"}]),
-            # Second turn, now with the tool result in context — decides
-            # it's done and falls through to the streamed final answer.
-            _FakeAIMessage(tool_calls=[]),
-        ],
-        stream_chunks=["The ", "answer is 4."],
-    )
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": "calculator", "args": {"expression": "2+2"}, "id": "call_1"}),
+        # Second turn, now with the tool result in context — answers.
+        _text_turn("The ", "answer is 4."),
+    ])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [chunk async for chunk in functions.astream_tool_response(ai_model, "8b", "what is 2+2", "", [])]
@@ -236,13 +235,10 @@ async def test_astream_tool_response_unknown_tool_name_reports_error_result(tool
         functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
     )
 
-    fake_llm = _FakeToolLLM(
-        invoke_responses=[
-            _FakeAIMessage(tool_calls=[{"name": "nonexistent", "args": {}, "id": "call_1"}]),
-            _FakeAIMessage(tool_calls=[]),
-        ],
-        stream_chunks=["ok"],
-    )
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": "nonexistent", "args": {}, "id": "call_1"}),
+        _text_turn("ok"),
+    ])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [chunk async for chunk in functions.astream_tool_response(ai_model, "8b", "hi", "", [])]
@@ -257,12 +253,15 @@ async def test_astream_tool_response_no_tool_calls_streams_immediately(tool_test
         functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
     )
 
-    fake_llm = _FakeToolLLM(invoke_responses=[_FakeAIMessage(tool_calls=[])], stream_chunks=["Hi ", "there."])
+    fake_llm = _FakeToolLLM([_text_turn("Hi ", "there.")])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [chunk async for chunk in functions.astream_tool_response(ai_model, "8b", "hi", "", [])]
 
     assert chunks == ["Hi ", "there."]
+    # The answer is streamed from the one and only generation — never
+    # decided in one call and regenerated in a second.
+    assert fake_llm.stream_calls == 1
 
 
 async def test_astream_tool_response_gives_up_after_max_iterations(tool_test_model, monkeypatch):
@@ -272,11 +271,10 @@ async def test_astream_tool_response_gives_up_after_max_iterations(tool_test_mod
     )
 
     # Always asks for another tool call — never terminates on its own.
-    responses = [
-        _FakeAIMessage(tool_calls=[{"name": "current_datetime", "args": {}, "id": f"call_{i}"}])
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": "current_datetime", "args": {}, "id": f"call_{i}"})
         for i in range(functions.MAX_TOOL_ITERATIONS)
-    ]
-    fake_llm = _FakeToolLLM(invoke_responses=responses, stream_chunks=[])
+    ])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [chunk async for chunk in functions.astream_tool_response(ai_model, "8b", "hi", "", [])]
@@ -307,13 +305,10 @@ async def test_astream_tool_response_routes_mcp_tool_calls(tool_test_model, mcp_
     monkeypatch.setattr(functions.mcp_client, "call_server_tool", _fake_call_tool)
 
     prefixed_name = "mcp_Local_search"
-    fake_llm = _FakeToolLLM(
-        invoke_responses=[
-            _FakeAIMessage(tool_calls=[{"name": prefixed_name, "args": {"q": "life"}, "id": "call_1"}]),
-            _FakeAIMessage(tool_calls=[]),
-        ],
-        stream_chunks=["done"],
-    )
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": prefixed_name, "args": {"q": "life"}, "id": "call_1"}),
+        _text_turn("done"),
+    ])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [
@@ -345,13 +340,10 @@ async def test_astream_tool_response_mcp_tool_call_failure_reports_error_result(
     monkeypatch.setattr(functions.mcp_client, "call_server_tool", _raise_call_tool)
 
     prefixed_name = "mcp_Local_search"
-    fake_llm = _FakeToolLLM(
-        invoke_responses=[
-            _FakeAIMessage(tool_calls=[{"name": prefixed_name, "args": {}, "id": "call_1"}]),
-            _FakeAIMessage(tool_calls=[]),
-        ],
-        stream_chunks=["done"],
-    )
+    fake_llm = _FakeToolLLM([
+        _tool_turn({"name": prefixed_name, "args": {}, "id": "call_1"}),
+        _text_turn("done"),
+    ])
     monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
 
     chunks = [
@@ -361,3 +353,24 @@ async def test_astream_tool_response_mcp_tool_call_failure_reports_error_result(
     ]
 
     assert "server went away" in chunks[0]["result"]
+
+
+async def test_astream_tool_response_streams_preamble_text_before_a_tool_call(tool_test_model, monkeypatch):
+    monkeypatch.setattr(
+        functions, "get_ollama_url", lambda model_name, parameters: ("http://fake", f"{model_name}:{parameters}")
+    )
+
+    fake_llm = _FakeToolLLM([
+        _text_turn("Let me check. ") + _tool_turn({"name": "calculator", "args": {"expression": "3*3"}, "id": "c1"}),
+        _text_turn("It's 9."),
+    ])
+    monkeypatch.setattr(functions, "ChatOllama", lambda **kwargs: fake_llm)
+
+    chunks = [chunk async for chunk in functions.astream_tool_response(tool_test_model, "8b", "3*3?", "", [])]
+
+    assert chunks == [
+        "Let me check. ",
+        {"name": "calculator", "args": {"expression": "3*3"}, "result": "9"},
+        "It's 9.",
+    ]
+    assert fake_llm.stream_calls == 2
