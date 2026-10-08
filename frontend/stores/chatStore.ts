@@ -128,8 +128,11 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const response = await api.value.get(url, { params: { model } })
 
+      // Ids arrive as numbers, but everything client-side (route state,
+      // selectedChatId) holds them as strings — normalize once here, or every
+      // `c.id === selectedChatId` lookup silently misses.
       if (response?.status === 200) {
-        allChats.value[model] = response.data
+        allChats.value[model] = response.data.map((chat: IChatSummary) => ({ ...chat, id: String(chat.id) }))
       }
     }
     catch (error: any) {
@@ -177,7 +180,8 @@ export const useChatStore = defineStore('chat', () => {
       const response = await api.value.post(url, {})
 
       if (response?.status === 201) {
-        const { id, title } = response.data
+        const id = String(response.data.id)
+        const { title } = response.data
 
         if (!allChats.value[model]) {
           allChats.value[model] = []
