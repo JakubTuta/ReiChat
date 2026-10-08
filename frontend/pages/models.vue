@@ -267,6 +267,15 @@ watch([aiModels, containers], () => {
   }
 }, { immediate: true, deep: true })
 
+// No chat model installed yet (embedding-only doesn't count): the
+// first-run "Get started" card shows instead of making a newcomer pick from
+// the whole catalog.
+const hasChatModelInstalled = computed(() => containers.value.some((c) => {
+  const catalogEntry = aiModels.value.find(m => m.model === c.environment?.model)
+
+  return catalogEntry && !catalogEntry.is_embedding
+}))
+
 const STATUS_META: Record<string, { dot: string, label: string }> = {
   running: { dot: 'mint', label: 'ready to chat' },
   exited: { dot: 'grey-dot', label: 'container stopped' },
@@ -659,6 +668,11 @@ const catalogueButtonLabel = computed(() => {
       </div>
     </div>
 
+    <GetStartedCard
+      v-if="!loading && aiModels.length && !hasChatModelInstalled"
+      class="models-get-started"
+    />
+
     <div
       v-if="hardware.gpu_available === false"
       class="cpu-hint"
@@ -1013,6 +1027,11 @@ const catalogueButtonLabel = computed(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 22px;
+}
+
+.models-get-started {
+  margin-bottom: 22px;
+  max-width: none;
 }
 
 .models-header-actions {

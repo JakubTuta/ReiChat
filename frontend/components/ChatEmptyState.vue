@@ -26,6 +26,12 @@ const emit = defineEmits<{
         No model is running yet
       </div>
 
+      <GetStartedCard class="empty-state-get-started" />
+
+      <div class="empty-state-or">
+        Or set one up yourself:
+      </div>
+
       <ol class="empty-state-steps">
         <li>Make sure <strong>Docker Desktop</strong> is running.</li>
 
@@ -66,6 +72,16 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+.empty-state-get-started {
+  margin: 14px 0 18px;
+}
+
+.empty-state-or {
+  font-size: 12px;
+  color: var(--color-ink-3);
+  margin-bottom: 6px;
+}
+
 .empty-state {
   flex: 1;
   display: flex;
