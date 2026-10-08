@@ -4,6 +4,7 @@ import threading
 from django.db import close_old_connections
 from django.db.models import Count, Q
 from rest_framework import status
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -271,6 +272,10 @@ class Collections(APIView):
 
 
 class Documents(APIView):
+    # The only endpoint that takes a file upload, so the only one that opts
+    # back into multipart over the JSON-only default (settings.REST_FRAMEWORK).
+    parser_classes = [JSONParser, MultiPartParser]
+
     @decorators.required_query_params(["collection_id"])
     def get(self, request: Request) -> Response:
         documents = models.Document.objects.filter(

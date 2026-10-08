@@ -48,6 +48,10 @@ REST_FRAMEWORK = {
     # runaway client loop, not a real per-user rate limit.
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
     "DEFAULT_THROTTLE_RATES": {"anon": "120/min"},
+    # JSON only — form/multipart bodies are what a cross-origin page can send
+    # without a CORS preflight. The one upload endpoint (Documents) opts back
+    # into multipart itself; see helpers/middleware.py for the actual guard.
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
 }
 
 INSTALLED_APPS = [
@@ -77,6 +81,7 @@ MIDDLEWARE = [
     # response) or CORS headers silently don't get attached to those
     # responses.
     "corsheaders.middleware.CorsMiddleware",
+    "helpers.middleware.OriginGuardMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
