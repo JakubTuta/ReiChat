@@ -47,7 +47,6 @@ def extract_document(filename: str, raw: bytes) -> ExtractedText:
             offset += len(page_text) + len(PAGE_SEPARATOR)
         return ExtractedText(PAGE_SEPARATOR.join(parts), page_starts)
 
-    # docx
     document = docx.Document(io.BytesIO(raw))
     return ExtractedText("\n\n".join(p.text for p in document.paragraphs if p.text), None)
 

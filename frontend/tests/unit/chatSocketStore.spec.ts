@@ -139,7 +139,6 @@ describe('chatSocketStore', () => {
     const store = useChatSocketStore()
 
     store.connectToChat('room1', 'llama3.1', 'http://localhost:8000/')
-    // never opened
 
     const sent = store.sendMessage({ message: 'hi', ai_model: 'llama3.1', ai_model_parameters: '' })
 

@@ -44,6 +44,25 @@ def test_frontend_origin_is_allowed(client):
     assert response.status_code == 201
 
 
+@pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:3000"])
+def test_frontend_origin_gets_cors_header_under_either_loopback_name(client, origin):
+    response = client.get("/personas/", HTTP_ORIGIN=origin)
+
+    assert response.status_code == 200
+    assert response.headers["Access-Control-Allow-Origin"] == origin
+
+
+def test_frontend_on_ip_loopback_can_write(client):
+    response = client.post(
+        "/personas/",
+        data=json.dumps({"name": "Pirate", "system_prompt": "Talk like a pirate."}),
+        content_type="application/json",
+        HTTP_ORIGIN="http://127.0.0.1:3000",
+    )
+
+    assert response.status_code == 201
+
+
 def test_request_without_origin_is_allowed_for_non_browser_clients(client):
     response = client.post(
         "/personas/",

@@ -45,7 +45,6 @@ body,
   font-family: var(--font-mono);
 }
 
-/* Mono, uppercase, tracked-out section/status label */
 .mono-kicker {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -96,7 +95,6 @@ body,
   }
 }
 
-/* Global thin scrollbar */
 * {
   scrollbar-width: thin;
   scrollbar-color: oklch(0.88 0.014 168) transparent;
@@ -118,7 +116,6 @@ body,
   background-clip: padding-box;
 }
 
-/* Smooth scrolling */
 html {
   scroll-behavior: smooth;
 }
@@ -255,7 +252,6 @@ html {
   background: oklch(0.92 0.06 60);
 }
 
-/* Dashed "add new" affordance — personas, templates, file sets, MCP servers */
 .dashed-add-row {
   width: 100%;
   margin-top: 8px;

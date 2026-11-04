@@ -881,9 +881,6 @@ async def test_edit_resend_missing_required_keys_reports_error(chat):
     await communicator.disconnect()
 
 
-# --- Tool calling ------------------------------------------------------------
-
-
 async def test_receive_uses_tool_path_when_chat_and_model_both_allow_it(tools_chat, monkeypatch):
     async def _fake_astream_tools(model, parameters, message, image, history, system_prompt=None, generation_params=None, stats=None, mcp_servers=None, reasoning=None, approve=None):
         yield {"name": "calculator", "args": {"expression": "2+2"}, "result": "4"}

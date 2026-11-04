@@ -180,7 +180,6 @@ const preparedAIModels = computed(() => {
     })
     .filter(model => model.versions.length > 0)
 
-  // Installed models (any container exists) float to the top
   const installed = withVersions.filter(m => getInstalledVersionCount(m) > 0)
   const rest = withVersions.filter(m => getInstalledVersionCount(m) === 0)
 

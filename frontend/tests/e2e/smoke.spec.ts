@@ -26,9 +26,9 @@ test('nav bar reaches Chat and Models from the landing page', async ({ page }) =
 })
 
 test('models page shows the bundled seed catalog with zero network calls', async ({ page }) => {
-  // Phase 0.1: a fresh install ships ~40 models via a data migration so the
-  // catalog works before the user ever presses "Fetch model list". This is
-  // the regression guard for that promise at the UI layer.
+  // A fresh install ships ~40 models via a data migration so the catalog
+  // works before the user ever presses "Fetch model list". This is the
+  // regression guard for that promise at the UI layer.
   await page.goto('/models')
 
   await expect(page.getByText('llama3.1', { exact: true }).first()).toBeVisible()

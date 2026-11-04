@@ -38,7 +38,6 @@ export default defineConfig({
     },
   },
   shortcuts: [
-    // Reused by: composer chip row, model-status chips.
     ['chip-mint', 'inline-flex items-center gap-1.5 rounded-full bg-mint-tint px-2.5 py-1 text-[11.5px]'],
     ['hairline', 'border border-line'],
   ],

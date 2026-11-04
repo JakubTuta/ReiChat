@@ -117,9 +117,6 @@ def test_patch_switch_branch_unknown_model_returns_404(client, branching_chat):
     assert response.status_code == 404
 
 
-# --- Personas -----------------------------------------------------------
-
-
 def test_get_personas_lists_alphabetically(client):
     models.Persona.objects.create(name="Zeta", system_prompt="z")
     models.Persona.objects.create(name="Alpha", system_prompt="a")
@@ -205,9 +202,6 @@ def test_delete_persona_not_found_returns_404(client):
     )
 
     assert response.status_code == 404
-
-
-# --- Prompt templates -----------------------------------------------------
 
 
 def test_get_prompt_templates_lists_alphabetically(client):
@@ -319,9 +313,6 @@ def test_delete_prompt_template_not_found_returns_404(client):
     )
 
     assert response.status_code == 404
-
-
-# --- Chat <-> persona wiring ----------------------------------------------
 
 
 def _all_chats_url(chat_history: models.ChatHistory) -> str:
@@ -474,9 +465,6 @@ def test_put_all_chats_no_fields_returns_400(client, chat):
     assert response.status_code == 400
 
 
-# --- Generation parameters -------------------------------------------------
-
-
 def test_put_all_chats_sets_generation_params(client, chat):
     response = client.put(
         _all_chats_url(chat),
@@ -543,9 +531,6 @@ def test_put_all_chats_seed_has_no_upper_or_lower_bound(client, chat):
     assert chat.seed == -12345
 
 
-# --- Search ----------------------------------------------------------------
-
-
 def test_get_search_finds_matches_for_the_model(client, chat):
     models.ChatMessage.objects.create(chat=chat, role="user", content="tell me about quantum computing")
 
@@ -578,9 +563,6 @@ def test_get_search_no_matches_returns_empty_list(client, chat):
 
     assert response.status_code == 200
     assert response.json() == []
-
-
-# --- Collections & Documents ------------------------------------------------
 
 
 class _SyncThread:
@@ -800,9 +782,6 @@ def test_delete_document_not_found_returns_404(client):
     assert response.status_code == 404
 
 
-# --- Chat <-> collections wiring --------------------------------------------
-
-
 def test_put_all_chats_sets_active_collections(client, chat, embedding_model):
     collection = models.DocumentCollection.objects.create(
         name="Docs", embedding_model=embedding_model, embedding_parameters="latest"
@@ -855,9 +834,6 @@ def test_get_all_chats_includes_active_collections(client, chat, embedding_model
     assert response.json()[0]["active_collections"] == [{"id": collection.id, "name": "Docs"}]
 
 
-# --- Chat <-> tools wiring ---------------------------------------------------
-
-
 def test_put_all_chats_enables_tools(client, chat):
     response = client.put(
         _all_chats_url(chat), data=json.dumps({"id": chat.id, "tools_enabled": True}), content_type="application/json"
@@ -898,9 +874,6 @@ def test_get_all_chats_includes_tools_enabled(client, chat):
     response = client.get(_all_chats_url(chat))
 
     assert response.json()[0]["tools_enabled"] is True
-
-
-# --- MCP servers -------------------------------------------------------------
 
 
 def test_post_mcp_server_stdio_creates_it(client):

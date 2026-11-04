@@ -33,8 +33,11 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 # actual defense for that case.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
-# The frontend, on the port compose publishes for it.
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000"]
+# The frontend, on the port compose publishes for it, under both names the
+# user may type. A browser treats them as different origins: missing one here
+# makes every response to that tab unreadable (no Access-Control-Allow-Origin),
+# so the app reports the backend as unreachable while Django logs 200s.
+CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],

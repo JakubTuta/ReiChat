@@ -63,14 +63,9 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      // This runs in the browser, not in a container, so it always reaches
-      // the backend over the host's network — docker-compose publishes the
-      // server's port to the host regardless of how it's deployed.
-      // `host.docker.internal` is only resolvable *inside* a container, so
-      // it was never reachable from here; combined with an operator-
-      // precedence bug below (`||` binds tighter than `? :`), any truthy
-      // SERVER_URL picked that unreachable branch instead of its own value
-      // — the setting was silently ignored no matter what it was set to.
+      // Runs in the browser, so it reaches the backend through the port
+      // docker-compose publishes on the host. `host.docker.internal` only
+      // resolves inside a container and would never work here.
       serverUrl: process.env.SERVER_URL || 'http://localhost:8000/',
     },
   },

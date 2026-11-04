@@ -156,9 +156,6 @@ def test_search_messages_includes_inactive_branches():
     assert "findme" in results[0]["snippet"].lower()
 
 
-# --- astream_tool_response ---------------------------------------------------
-
-
 def _text_turn(*texts: str) -> list[AIMessageChunk]:
     return [AIMessageChunk(content=text) for text in texts]
 

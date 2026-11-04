@@ -29,11 +29,9 @@ export type ContainerSocketMessageType
 
 export interface ContainerSocketMessage {
   type: ContainerSocketMessageType
-  // snapshot fields
   containers?: ContainerInfo[]
   progress?: Record<string, PullProgressInfo>
   scrape?: ScrapeProgressInfo
-  // progress event fields
   container?: string
   phase?: string
   percent?: number
@@ -42,7 +40,6 @@ export interface ContainerSocketMessage {
   // container_update: a plain-language success message (e.g. after an
   // Ollama update) rather than an error.
   info?: string
-  // scrape_progress fields
   running?: boolean
   total?: number | null
   completed?: number
