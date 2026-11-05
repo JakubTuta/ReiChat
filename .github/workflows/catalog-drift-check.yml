@@ -19,16 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          python-version: '3.12'
+          version: "0.13.5"
 
-      - name: Install parser dependencies
-        run: pip install httpx beautifulsoup4
-
+      # Only the parser's own two dependencies: the check must not need the
+      # rest of the backend (or its lockfile) to run.
       - name: Parse the live ollama.com library page
-        working-directory: django_server
-        run: python -m django_app.catalog.check_live
+        working-directory: backend
+        run: uv run --no-project --with httpx --with beautifulsoup4 python -m app.catalog.check_live
 
       - name: Open an issue if parsing broke
         if: failure()
@@ -43,4 +42,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "Catalog parser broke against live ollama.com" \
             --label catalog-drift \
-            --body "The scheduled catalog drift check failed: \`django_app/catalog/parser.py\` could not parse ollama.com's library page (or returned suspiciously few models). ollama.com's markup has likely changed again. See the failed run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            --body "The scheduled catalog drift check failed: \`backend/app/catalog/parser.py\` could not parse ollama.com's library page (or returned suspiciously few models). ollama.com's markup has likely changed again. See the failed run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

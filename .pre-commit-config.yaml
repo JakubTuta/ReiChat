@@ -12,4 +12,13 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
-        files: ^django_server/
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.5
+    hooks:
+      - id: uv-lock
+        args: [--project, backend]
+        files: ^backend/(pyproject\.toml|uv\.lock)$
