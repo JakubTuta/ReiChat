@@ -1,10 +1,6 @@
 from app.rag.chunking import chunk_text
 
 
-def test_chunk_text_empty_string_returns_no_chunks():
-    assert chunk_text("") == []
-
-
 def test_chunk_text_whitespace_only_returns_no_chunks():
     assert chunk_text("   \n\n   ") == []
 

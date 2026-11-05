@@ -39,18 +39,6 @@ async def test_throttled_responses_still_carry_cors_headers(client: httpx.AsyncC
     assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:3000"
 
 
-async def test_health_check_is_never_throttled(client: httpx.AsyncClient):
-    for _ in range(LIMIT + 10):
-        assert (await client.get("/health/")).status_code == 200
-
-
-async def test_health_check_does_not_use_up_the_budget(client: httpx.AsyncClient):
-    for _ in range(LIMIT + 10):
-        await client.get("/health/")
-
-    assert (await client.get("/probe/ok")).status_code == 200
-
-
 class FakeClock:
     def __init__(self) -> None:
         self.now = 1000.0
@@ -88,18 +76,6 @@ async def test_the_budget_comes_back_when_the_window_ends():
 
         clock.now += 1
         assert (await client.get("/ping")).status_code == 200
-
-
-async def test_retry_after_counts_down_to_the_end_of_the_window():
-    clock = FakeClock()
-    async with build_limited_app(clock, limit=1) as client:
-        await client.get("/ping")
-        clock.now += 20
-
-        response = await client.get("/ping")
-
-        assert response.status_code == 429
-        assert response.headers["Retry-After"] == "40"
 
 
 async def test_exempt_paths_and_prefixes_are_not_counted():

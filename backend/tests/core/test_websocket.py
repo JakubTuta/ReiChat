@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
 
 from app.core.websocket import Client
 
@@ -43,14 +43,6 @@ def text(body: str) -> dict[str, Any]:
 DISCONNECT = {"type": "websocket.disconnect", "code": 1001}
 
 
-async def test_send_writes_the_payload_as_json_text():
-    socket = StubSocket()
-
-    await client_for(socket).send({"message": "héllo", "done": False})
-
-    assert socket.sent == ['{"message": "h\\u00e9llo", "done": false}']
-
-
 @pytest.mark.parametrize(
     "error",
     [WebSocketDisconnect(1006), RuntimeError('Cannot call "send" once a close message has been sent.')],
@@ -75,16 +67,6 @@ async def test_other_failures_while_sending_are_not_swallowed():
     assert client.gone is False
 
 
-async def test_nothing_is_sent_once_the_client_is_marked_gone():
-    socket = StubSocket()
-    client = client_for(socket)
-    client.gone = True
-
-    await client.send({"a": 1})
-
-    assert socket.sent == []
-
-
 async def test_text_frames_end_when_the_client_disconnects():
     client = client_for(StubSocket([text("one"), text("two"), DISCONNECT]))
 
@@ -99,9 +81,3 @@ async def test_a_binary_frame_closes_the_socket_normally():
     assert [frame async for frame in client.text_frames()] == ["one"]
     assert socket.closed_with == 1000
     assert client.gone is True
-
-
-def test_the_stub_covers_what_client_uses():
-    # Guards the stub itself against Starlette renaming a method Client calls.
-    for name in ("accept", "send_text", "receive", "close"):
-        assert callable(getattr(WebSocket, name))

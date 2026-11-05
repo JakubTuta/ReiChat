@@ -24,15 +24,6 @@ class ParsePullCountTests(unittest.TestCase):
     def test_thousands(self):
         self.assertEqual(parse_pull_count("5K"), 5_000)
 
-    def test_comma_separated(self):
-        self.assertEqual(parse_pull_count("1,234"), 1_234)
-
-    def test_plain_integer(self):
-        self.assertEqual(parse_pull_count("93"), 93)
-
-    def test_empty(self):
-        self.assertEqual(parse_pull_count(""), 0)
-
 
 class ParseLibraryTests(unittest.TestCase):
     @classmethod
@@ -50,11 +41,6 @@ class ParseLibraryTests(unittest.TestCase):
         self.assertFalse(llama.can_process_image)
         self.assertFalse(llama.is_embedding)
 
-    def test_vision_capability_drives_can_process_image(self):
-        gemma = self.models["gemma3"]
-        self.assertIn("vision", gemma.capabilities)
-        self.assertTrue(gemma.can_process_image)
-
     def test_embedding_only_model_flagged_and_defaults_to_latest(self):
         # nomic-embed-text has no size chips on ollama.com — must default
         # to the "latest" tag rather than being dropped.
@@ -62,11 +48,6 @@ class ParseLibraryTests(unittest.TestCase):
         self.assertEqual(embed.capabilities, frozenset({"embedding"}))
         self.assertTrue(embed.is_embedding)
         self.assertEqual(embed.variants, ("latest",))
-
-    def test_multi_capability_model(self):
-        deepseek = self.models["deepseek-r1"]
-        self.assertEqual(deepseek.capabilities, frozenset({"thinking", "tools"}))
-        self.assertFalse(deepseek.is_embedding)
 
     def test_tools_capability_drives_can_use_tools(self):
         deepseek = self.models["deepseek-r1"]

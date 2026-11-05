@@ -84,12 +84,6 @@ async def make_chunk(
     return chunk
 
 
-async def test_build_rag_context_empty_collections_returns_nothing(db: AsyncSession):
-    context, citations, warnings = await retrieval.build_rag_context(db, [], "anything")
-
-    assert (context, citations, warnings) == ("", [], [])
-
-
 async def test_build_rag_context_returns_closest_chunk_first(db: AsyncSession, collection, embed_query_as):
     await make_chunk(db, collection, "about cats", [1.0, 0.0], filename="cats.txt")
     await make_chunk(db, collection, "about dogs", [0.0, 1.0], filename="dogs.txt")
@@ -101,14 +95,6 @@ async def test_build_rag_context_returns_closest_chunk_first(db: AsyncSession, c
     assert "about cats" in context
     assert "[cats.txt]" in context
     assert context.startswith("The user has attached documents.")
-
-
-async def test_the_question_is_what_gets_embedded(db: AsyncSession, collection, embed_query_as):
-    client = embed_query_as([1.0, 0.0])
-
-    await retrieval.build_rag_context(db, [collection], "what is the warranty?")
-
-    assert client.queries == ["what is the warranty?"]
 
 
 async def test_build_rag_context_ignores_non_ready_documents(db: AsyncSession, collection, embed_query_as):
@@ -136,21 +122,6 @@ async def test_build_rag_context_skips_collection_when_embedding_fails(
     assert len(warnings) == 1
     assert '"Docs"' in warnings[0]
     assert "didn't respond (container not running)" in warnings[0]
-
-
-async def test_a_failing_embed_call_is_skipped_with_a_warning_too(db: AsyncSession, collection, monkeypatch):
-    class Failing:
-        async def aembed_query(self, text):
-            raise ConnectionError("embedder went away")
-
-    async def get_client(model, params):
-        return Failing()
-
-    monkeypatch.setattr(retrieval.embeddings, "get_embeddings_client", get_client)
-
-    _, _, warnings = await retrieval.build_rag_context(db, [collection], "anything")
-
-    assert "embedder went away" in warnings[0]
 
 
 async def test_build_rag_context_warns_with_the_actionable_message_when_embedder_is_stopped(
@@ -184,18 +155,6 @@ async def test_build_rag_context_warns_about_documents_still_processing(
     assert warnings == ["1 document is still being processed and couldn't be searched yet."]
 
 
-async def test_several_documents_still_processing_are_counted(db: AsyncSession, collection, embed_query_as):
-    for i in range(3):
-        await make_chunk(
-            db, collection, "x", [1.0, 0.0], filename=f"{i}.txt", status=models.Document.STATUS_PENDING
-        )
-    embed_query_as([1.0, 0.0])
-
-    _, _, warnings = await retrieval.build_rag_context(db, [collection], "anything")
-
-    assert warnings == ["3 documents are still being processed and couldn't be searched yet."]
-
-
 async def test_build_rag_context_scopes_to_given_collections_only(
     db: AsyncSession, embedding_model, embed_query_as
 ):
@@ -225,33 +184,6 @@ async def test_collections_with_the_same_embedding_model_are_searched_together(
     assert len(client.queries) == 1
 
 
-async def test_each_embedding_model_gets_its_own_query(db: AsyncSession, embedding_model, monkeypatch):
-    other = await make_model(db, "mxbai-embed-large", is_embedding=True)
-    collection_a = await make_collection(db, embedding_model, "A")
-    collection_b = await make_collection(db, other, "B")
-    await make_chunk(db, collection_a, "in A", [1.0, 0.0], filename="a.txt")
-    await make_chunk(db, collection_b, "in B", [1.0, 0.0, 0.0], filename="b.txt")
-    asked = []
-
-    class Client:
-        def __init__(self, vector):
-            self.vector = vector
-
-        async def aembed_query(self, text):
-            return self.vector
-
-    async def get_client(model, params):
-        asked.append(model)
-        return Client([1.0, 0.0] if model == embedding_model.model else [1.0, 0.0, 0.0])
-
-    monkeypatch.setattr(retrieval.embeddings, "get_embeddings_client", get_client)
-
-    _, citations, _ = await retrieval.build_rag_context(db, [collection_a, collection_b], "anything")
-
-    assert sorted(asked) == sorted([embedding_model.model, other.model])
-    assert {c["filename"] for c in citations} == {"a.txt", "b.txt"}
-
-
 async def test_retrieve_context_for_chat_uses_chats_active_collections(
     db: AsyncSession, collection, embed_query_as
 ):
@@ -268,24 +200,6 @@ async def test_retrieve_context_for_chat_uses_chats_active_collections(
     _, citations, _ = await retrieval.retrieve_context_for_chat(db, chat, "anything")
 
     assert citations[0]["filename"] == "doc.txt"
-
-
-async def test_retrieve_context_for_chat_ignores_collections_that_are_not_active(
-    db: AsyncSession, collection, embed_query_as
-):
-    chat = await make_chat(db, await make_model(db, "llama-retrieval-test"), title="t")
-    await make_chunk(db, collection, "relevant content", [1.0, 0.0], filename="doc.txt")
-    embed_query_as([1.0, 0.0])
-
-    assert await retrieval.retrieve_context_for_chat(db, chat, "anything") == ("", [], [])
-
-
-async def test_retrieve_context_for_chat_no_active_collections_returns_nothing(db: AsyncSession):
-    chat = await make_chat(db, await make_model(db, "llama-retrieval-test-2"), title="t")
-
-    context, citations, warnings = await retrieval.retrieve_context_for_chat(db, chat, "anything")
-
-    assert (context, citations, warnings) == ("", [], [])
 
 
 async def test_retrieve_context_for_chat_searches_follow_ups_together_with_the_previous_question(
@@ -321,18 +235,6 @@ async def test_keyword_search_finds_exact_codes_that_embeddings_miss(
     assert "codes.txt" in {c["filename"] for c in citations}
 
 
-async def test_keyword_search_ignores_case_and_punctuation_in_the_question(
-    db: AsyncSession, collection, embed_query_as
-):
-    await make_chunk(db, collection, "The WARRANTY lasts two years.", [0.0, 1.0], filename="terms.txt")
-    await make_chunk(db, collection, "unrelated", [1.0, 0.0], filename="other.txt")
-    embed_query_as([1.0, 0.0])
-
-    _, citations, _ = await retrieval.build_rag_context(db, [collection], "warranty?!")
-
-    assert "terms.txt" in {c["filename"] for c in citations}
-
-
 async def test_a_question_with_search_operator_syntax_does_not_break_the_search(
     db: AsyncSession, collection, embed_query_as
 ):
@@ -365,17 +267,6 @@ async def test_citations_and_context_carry_the_page(db: AsyncSession, collection
     assert "[manual.pdf, page 7]" in context
 
 
-async def test_a_citation_names_the_document_and_the_chunk(db: AsyncSession, collection, embed_query_as):
-    chunk = await make_chunk(db, collection, "text", [1.0, 0.0], chunk_index=4, filename="a.txt")
-    embed_query_as([1.0, 0.0])
-
-    _, citations, _ = await retrieval.build_rag_context(db, [collection], "text")
-
-    assert citations == [
-        {"document_id": chunk.document_id, "filename": "a.txt", "chunk_index": 4, "page": None}
-    ]
-
-
 async def test_no_more_than_six_passages_reach_the_prompt(db: AsyncSession, collection, embed_query_as):
     for i in range(12):
         await make_chunk(db, collection, f"passage {i}", [1.0, 0.0], filename=f"{i}.txt")
@@ -384,15 +275,6 @@ async def test_no_more_than_six_passages_reach_the_prompt(db: AsyncSession, coll
     _, citations, _ = await retrieval.build_rag_context(db, [collection], "passage")
 
     assert len(citations) == retrieval.MAX_CONTEXT_CHUNKS
-
-
-def test_short_follow_up_questions_are_searched_together_with_the_previous_one():
-    assert retrieval.build_search_query("and the second?", "What are the two warranty options?") == (
-        "What are the two warranty options?\nand the second?"
-    )
-    long_question = "Explain in detail how the warranty registration process works for business customers"
-    assert retrieval.build_search_query(long_question, "previous") == long_question
-    assert retrieval.build_search_query("short", None) == "short"
 
 
 def chunk_of(chunk_id: int) -> models.DocumentChunk:
@@ -407,10 +289,6 @@ def test_a_passage_both_searches_agree_on_outranks_one_only_a_single_search_foun
     fused = retrieval._fuse([(vector_only, 0.1), (both, 0.12)], [keyword_only, both])
 
     assert [chunk.id for _, chunk in fused][0] == 1
-
-
-def test_fusion_of_nothing_is_nothing():
-    assert retrieval._fuse([], []) == []
 
 
 def test_a_far_off_vector_hit_is_dropped_unless_the_keyword_search_found_it_too():

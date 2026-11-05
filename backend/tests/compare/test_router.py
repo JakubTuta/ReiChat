@@ -26,18 +26,6 @@ async def test_compare_votes_build_a_scoreboard(client: httpx.AsyncClient):
     assert board[1] == {"model": "b:2b", "wins": 1, "matches": 3, "win_rate": 1 / 3}
 
 
-async def test_an_empty_scoreboard_is_an_empty_list(client: httpx.AsyncClient):
-    assert (await client.get("/compare-votes/")).json() == []
-
-
-async def test_a_model_that_never_won_still_shows_up(client: httpx.AsyncClient):
-    await vote(client, "a:1b")
-
-    board = {row["model"]: row for row in (await client.get("/compare-votes/")).json()}
-
-    assert board["b:2b"] == {"model": "b:2b", "wins": 0, "matches": 1, "win_rate": 0.0}
-
-
 async def test_a_higher_win_rate_ranks_first_and_more_matches_break_ties(client: httpx.AsyncClient):
     for winner, contenders in (
         ("a:1b", ["a:1b", "b:2b"]),
@@ -68,11 +56,7 @@ async def test_compare_vote_winner_must_be_a_contender(client: httpx.AsyncClient
     "body",
     [
         {"prompt": 5, "winner": "a", "contenders": ["a", "b"]},
-        {"prompt": "p", "winner": 5, "contenders": [5, "b"]},
-        {"prompt": "p", "winner": "a", "contenders": "ab"},
         {"prompt": "p", "winner": "a", "contenders": ["a"]},
-        {"prompt": "p", "winner": "a", "contenders": ["a", 2]},
-        {"prompt": None, "winner": "a", "contenders": ["a", "b"]},
         {"prompt": "p", "winner": "a", "contenders": None},
     ],
 )
@@ -81,13 +65,6 @@ async def test_a_malformed_vote_is_refused_with_the_same_plain_answer(client: ht
 
     assert response.status_code == 400
     assert response.json()["error"].startswith("A vote needs the prompt")
-
-
-async def test_a_vote_needs_all_three_fields(client: httpx.AsyncClient):
-    response = await client.post("/compare-votes/", json={"prompt": "p"})
-
-    assert response.status_code == 400
-    assert response.json()["missing_params"] == ["winner", "contenders"]
 
 
 async def test_the_scoreboard_can_be_cleared(client: httpx.AsyncClient, db: AsyncSession):

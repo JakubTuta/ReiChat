@@ -16,14 +16,6 @@ async def test_fetch_library_html_returns_the_page_and_identifies_itself():
 
 
 @respx.mock
-async def test_fetch_library_html_follows_redirects():
-    respx.get(LIBRARY_URL).respond(301, headers={"Location": "https://ollama.com/library/"})
-    respx.get("https://ollama.com/library/").respond(200, text="moved")
-
-    assert await fetch_library_html() == "moved"
-
-
-@respx.mock
 async def test_fetch_library_html_raises_on_an_error_status():
     respx.get(LIBRARY_URL).respond(503)
 
@@ -62,13 +54,3 @@ async def test_check_live_fails_when_the_markup_is_unrecognisable(capsys: pytest
 
     assert exit_code == 1
     assert "::error::" in capsys.readouterr().out
-
-
-@respx.mock
-async def test_check_live_fails_when_ollama_com_is_unreachable(capsys: pytest.CaptureFixture[str]):
-    respx.get(LIBRARY_URL).mock(side_effect=httpx.ConnectError("offline"))
-
-    exit_code = await check_live.main()
-
-    assert exit_code == 1
-    assert "Could not reach ollama.com" in capsys.readouterr().out

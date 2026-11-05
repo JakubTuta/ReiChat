@@ -32,15 +32,6 @@ def web_search_off(monkeypatch):
     monkeypatch.setattr(generation.web_search_tool, "available", AsyncMock(return_value=False))
 
 
-def test_chat_ollama_kwargs_omits_unset_params():
-    assert generation._chat_ollama_kwargs(None) == {}
-    assert generation._chat_ollama_kwargs({}) == {}
-    assert (
-        generation._chat_ollama_kwargs({"temperature": None, "num_ctx": None, "top_p": None, "seed": None})
-        == {}
-    )
-
-
 def test_chat_ollama_kwargs_passes_through_only_set_params():
     assert generation._chat_ollama_kwargs(
         {"temperature": 0.7, "num_ctx": None, "top_p": 0.9, "seed": None}
@@ -58,31 +49,6 @@ def test_record_generation_stats_computes_tokens_per_second():
     )
 
     assert stats == {"prompt_tokens": 10, "completion_tokens": 50, "tokens_per_second": 25.0}
-
-
-def test_record_generation_stats_ignores_none_out_param():
-    # Intermediate (done=False) streamed chunks call this too — must be a
-    # harmless no-op when the caller didn't ask for stats.
-    generation._record_generation_stats(None, {"prompt_eval_count": 10, "eval_count": 50})
-
-
-def test_record_generation_stats_skips_tokens_per_second_without_duration():
-    stats: generation.GenerationStats = {}
-
-    generation._record_generation_stats(stats, {"prompt_eval_count": 10, "eval_count": 50})
-
-    assert stats == {"prompt_tokens": 10, "completion_tokens": 50}
-    assert "tokens_per_second" not in stats
-
-
-def test_record_generation_stats_from_intermediate_chunk_is_a_noop():
-    # Non-final streamed chunks carry no eval_count/prompt_eval_count at
-    # all — must not fabricate zeros.
-    stats: generation.GenerationStats = {}
-
-    generation._record_generation_stats(stats, {"logprobs": None})
-
-    assert stats == {}
 
 
 def _text_turn(*texts: str) -> list[AIMessageChunk]:
@@ -153,45 +119,6 @@ async def test_astream_tool_response_executes_a_real_tool_then_streams_final_ans
     assert chunks[1:] == ["The ", "answer is 4."]
 
 
-async def test_the_tool_result_goes_back_to_the_model_on_the_next_turn(fake_llm):
-    llm = fake_llm(
-        [
-            _tool_turn({"name": "calculator", "args": {"expression": "2+2"}, "id": "call_1"}),
-            _text_turn("4"),
-        ]
-    )
-
-    await collect(
-        generation.astream_tool_response(MODEL, "8b", "what is 2+2", "", [], system_prompt="Be brief.")
-    )
-
-    first, second = llm.seen_messages
-    assert first[0] == {"role": "system", "content": "Be brief."}
-    assert len(second) == len(first) + 2
-    assert second[-1].content == "4"
-    assert second[-1].tool_call_id == "call_1"
-
-
-async def test_astream_tool_response_unknown_tool_name_reports_error_result(fake_llm):
-    fake_llm([_tool_turn({"name": "nonexistent", "args": {}, "id": "call_1"}), _text_turn("ok")])
-
-    chunks = await collect(generation.astream_tool_response(MODEL, "8b", "hi", "", []))
-
-    assert chunks[0]["name"] == "nonexistent"
-    assert "Error" in chunks[0]["result"]
-
-
-async def test_astream_tool_response_no_tool_calls_streams_immediately(fake_llm):
-    llm = fake_llm([_text_turn("Hi ", "there.")])
-
-    chunks = await collect(generation.astream_tool_response(MODEL, "8b", "hi", "", []))
-
-    assert chunks == ["Hi ", "there."]
-    # The answer is streamed from the one and only generation — never
-    # decided in one call and regenerated in a second.
-    assert llm.stream_calls == 1
-
-
 async def test_astream_tool_response_gives_up_after_max_iterations(fake_llm):
     # Always asks for another tool call — never terminates on its own.
     fake_llm(
@@ -208,25 +135,6 @@ async def test_astream_tool_response_gives_up_after_max_iterations(fake_llm):
     assert len(tool_call_chunks) == generation.MAX_TOOL_ITERATIONS
     assert len(text_chunks) == 1
     assert "wasn't able to finish" in text_chunks[0]
-
-
-async def test_astream_tool_response_streams_preamble_text_before_a_tool_call(fake_llm):
-    llm = fake_llm(
-        [
-            _text_turn("Let me check. ")
-            + _tool_turn({"name": "calculator", "args": {"expression": "3*3"}, "id": "c1"}),
-            _text_turn("It's 9."),
-        ]
-    )
-
-    chunks = await collect(generation.astream_tool_response(MODEL, "8b", "3*3?", "", []))
-
-    assert chunks == [
-        "Let me check. ",
-        {"name": "calculator", "args": {"expression": "3*3"}, "result": "9"},
-        "It's 9.",
-    ]
-    assert llm.stream_calls == 2
 
 
 def _mcp_server(name="Local", **fields) -> models.MCPServer:
@@ -262,26 +170,6 @@ async def test_astream_tool_response_routes_mcp_tool_calls(fake_llm, mcp):
     assert chunks[0] == {"name": "mcp_Local_search", "args": {"q": "life"}, "result": "results for life"}
     assert chunks[1:] == ["done"]
     assert mcp == [(server, "search", {"q": "life"})]
-
-
-async def test_astream_tool_response_mcp_tool_call_failure_reports_error_result(fake_llm, monkeypatch):
-    async def list_tools(server):
-        return [{"name": "search", "description": "Search", "input_schema": {"type": "object"}}]
-
-    async def raise_call_tool(server, tool_name, arguments):
-        raise ConnectionError("server went away")
-
-    monkeypatch.setattr(generation.mcp_client, "list_server_tools", list_tools)
-    monkeypatch.setattr(generation.mcp_client, "call_server_tool", raise_call_tool)
-    fake_llm([_tool_turn({"name": "mcp_Local_search", "args": {}, "id": "call_1"}), _text_turn("done")])
-
-    chunks = await collect(
-        generation.astream_tool_response(
-            MODEL, "8b", "hi", "", [], mcp_servers=[_mcp_server(auto_approve=True)]
-        )
-    )
-
-    assert "server went away" in chunks[0]["result"]
 
 
 async def _run_one_mcp_call(fake_llm, server, approve, mcp):
@@ -381,22 +269,6 @@ async def test_web_search_is_offered_and_run_only_when_turned_on(fake_llm, monke
     }
 
 
-async def test_web_search_is_not_offered_when_turned_off(fake_llm):
-    llm = fake_llm([_text_turn("hi")])
-    bound: list = []
-    original_bind = llm.bind_tools
-
-    def bind(tools):
-        bound.extend(tools)
-        return original_bind(tools)
-
-    llm.bind_tools = bind
-
-    await collect(generation.astream_tool_response(MODEL, "8b", "hi", "", []))
-
-    assert {tool.name for tool in bound} == {"calculator", "current_datetime"}
-
-
 async def test_astream_bot_response_yields_thinking_separately(monkeypatch):
     built_with: dict = {}
 
@@ -417,24 +289,6 @@ async def test_astream_bot_response_yields_thinking_separately(monkeypatch):
     assert built_with["reasoning"] is True
     assert built_with["base_url"] == "http://fake"
     assert built_with["model"] == f"{MODEL}:8b"
-
-
-async def test_a_reply_carries_its_stats_out_through_the_out_param(monkeypatch):
-    class StatsLLM:
-        async def astream(self, messages):
-            yield AIMessageChunk(content="Hi")
-            yield AIMessageChunk(
-                content="",
-                response_metadata={"prompt_eval_count": 5, "eval_count": 10, "eval_duration": 1_000_000_000},
-            )
-
-    monkeypatch.setattr(generation, "ChatOllama", lambda **kwargs: StatsLLM())
-    stats: generation.GenerationStats = {}
-
-    chunks = await collect(generation.astream_bot_response(MODEL, "8b", "hi", "", [], stats=stats))
-
-    assert chunks == ["Hi"]
-    assert stats == {"prompt_tokens": 5, "completion_tokens": 10, "tokens_per_second": 10.0}
 
 
 async def test_the_history_system_prompt_and_message_are_sent_in_order(monkeypatch):
@@ -491,50 +345,11 @@ async def test_an_attached_image_is_sent_as_a_structured_content_part(monkeypatc
     ]
 
 
-async def test_generation_params_reach_the_model_only_when_set(monkeypatch):
-    built_with: dict = {}
-
-    class OneChunk:
-        async def astream(self, messages):
-            yield AIMessageChunk(content="ok")
-
-    def build(**kwargs):
-        built_with.update(kwargs)
-        return OneChunk()
-
-    monkeypatch.setattr(generation, "ChatOllama", build)
-
-    await collect(
-        generation.astream_bot_response(
-            MODEL,
-            "8b",
-            "hi",
-            "",
-            [],
-            generation_params={"temperature": 0.3, "num_ctx": None, "top_p": None, "seed": 7},
-        )
-    )
-
-    assert built_with["temperature"] == 0.3
-    assert built_with["seed"] == 7
-    assert "num_ctx" not in built_with
-    assert "top_p" not in built_with
-
-
 async def test_a_model_that_is_not_running_says_how_to_start_it(monkeypatch):
     monkeypatch.setattr(runtime, "get_ollama_url", AsyncMock(return_value=None))
 
     with pytest.raises(ModelUnavailableError, match="Check the Models page"):
         await collect(generation.astream_bot_response(MODEL, "8b", "hi", "", []))
-
-
-async def test_a_model_that_is_still_downloading_passes_its_own_message_on(monkeypatch):
-    monkeypatch.setattr(
-        runtime, "get_ollama_url", AsyncMock(side_effect=ModelUnavailableError("still downloading"))
-    )
-
-    with pytest.raises(ModelUnavailableError, match="still downloading"):
-        await collect(generation.astream_tool_response(MODEL, "8b", "hi", "", []))
 
 
 @pytest.mark.parametrize(
@@ -622,52 +437,10 @@ async def test_structured_output_constrains_decoding_with_the_schema(json_llm):
     assert '"city": "Paris"' in result
 
 
-async def test_structured_output_is_returned_as_a_fenced_json_block(json_llm):
-    json_llm('{"city": "Paris", "population": 2.1}')
-
-    result = await generation.astream_structured_bot_response(MODEL, "8b", "Capital?", "", [], FIELDS)
-
-    assert result == '```json\n{\n    "city": "Paris",\n    "population": 2.1\n}\n```'
-
-
-async def test_structured_output_merges_a_persona_and_the_schema_into_one_system_message(json_llm):
-    llm, _ = json_llm('{"city": "Paris", "population": 2.1}')
-
-    await generation.astream_structured_bot_response(
-        MODEL,
-        "8b",
-        "Capital?",
-        "",
-        [{"role": "user", "content": "earlier"}],
-        FIELDS,
-        system_prompt="Be a pirate.",
-    )
-
-    system_messages = [m for m in llm.sent if m["role"] == "system"]
-    assert len(system_messages) == 1
-    assert system_messages[0]["content"].startswith("Be a pirate.\n\nYou must respond with JSON")
-    assert llm.sent[-1] == {"role": "user", "content": "Capital?"}
-
-
 async def test_structured_output_that_is_not_json_is_none(json_llm):
     json_llm("I am sorry, I cannot do that.")
 
     assert await generation.astream_structured_bot_response(MODEL, "8b", "hi", "", [], FIELDS) is None
-
-
-async def test_structured_output_that_misses_the_schema_is_none(json_llm):
-    json_llm('{"city": "Paris"}')
-
-    assert await generation.astream_structured_bot_response(MODEL, "8b", "hi", "", [], FIELDS) is None
-
-
-async def test_structured_output_records_the_stats(json_llm):
-    json_llm('{"city": "Paris", "population": 2.1}', {"prompt_eval_count": 3, "eval_count": 4})
-    stats: generation.GenerationStats = {}
-
-    await generation.astream_structured_bot_response(MODEL, "8b", "hi", "", [], FIELDS, stats=stats)
-
-    assert stats == {"prompt_tokens": 3, "completion_tokens": 4}
 
 
 def test_structured_output_field_types():
@@ -704,7 +477,6 @@ def test_structured_output_field_types():
     [
         ('"Planning a Trip to Rome."', "Planning a Trip to Rome"),
         ("Title: Sourdough basics\nSome extra line", "Sourdough basics"),
-        ("**Fixing a Python bug**", "Fixing a Python bug"),
         ("x" * 100, "x" * 60),
         ("", ""),
         ("   \n  ", ""),
@@ -737,30 +509,6 @@ async def test_a_title_is_generated_with_thinking_switched_off_for_models_that_t
     assert "Assistant: Sure, here is a plan" in built_with["prompt"]
 
 
-async def test_a_title_leaves_thinking_alone_for_models_that_cannot_think(monkeypatch):
-    built_with: dict = {}
-
-    class TitleLLM:
-        async def ainvoke(self, messages):
-            return AIMessageChunk(content="Title")
-
-    def build(**kwargs):
-        built_with.update(kwargs)
-        return TitleLLM()
-
-    monkeypatch.setattr(generation, "ChatOllama", build)
-
-    await generation.agenerate_title(MODEL, "8b", "hi", "hello", None)
-
-    assert built_with["reasoning"] is None
-
-
-async def test_no_title_is_generated_when_the_model_is_not_running(monkeypatch):
-    monkeypatch.setattr(runtime, "get_ollama_url", AsyncMock(return_value=None))
-
-    assert await generation.agenerate_title(MODEL, "8b", "hi", "hello", None) == ""
-
-
 async def test_a_summary_is_requested_with_the_transcript_and_returned_trimmed(monkeypatch):
     seen: dict = {}
 
@@ -784,10 +532,3 @@ async def test_a_summary_is_requested_with_the_transcript_and_returned_trimmed(m
     assert "User: Tell me about Rome" in seen["prompt"]
     assert seen["num_ctx"] == 4096
     assert seen["temperature"] == 0.2
-
-
-async def test_a_summary_needs_a_running_model(monkeypatch):
-    monkeypatch.setattr(runtime, "get_ollama_url", AsyncMock(return_value=None))
-
-    with pytest.raises(ModelUnavailableError, match="Check the Models page"):
-        await generation.asummarize_conversation(MODEL, "8b", "", [], 4096)

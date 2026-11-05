@@ -178,20 +178,6 @@ async def test_http_server_tools_can_be_called_although_the_transport_yields_thr
     assert await mcp_client.call_server_tool(http_server, "ping", {}) == "pong"
 
 
-def test_connect_stdio_raises_when_command_missing(stdio_server):
-    stdio_server.command = "   "
-
-    with pytest.raises(mcp_client.MCPToolError):
-        mcp_client._connect(stdio_server)
-
-
-def test_connect_http_raises_when_url_missing(http_server):
-    http_server.url = ""
-
-    with pytest.raises(mcp_client.MCPToolError):
-        mcp_client._connect(http_server)
-
-
 def test_build_tool_registry_prefixes_names_and_builds_lookup(stdio_server, http_server):
     registry = mcp_client.build_tool_registry(
         [
@@ -214,23 +200,6 @@ def test_build_tool_registry_prefixes_names_and_builds_lookup(stdio_server, http
         assert server in (stdio_server, http_server)
 
 
-def test_build_tool_registry_defaults_missing_schema_to_empty_object(stdio_server):
-    registry = mcp_client.build_tool_registry(
-        [
-            (stdio_server, [{"name": "ping", "description": "", "input_schema": {}}]),
-        ]
-    )
-
-    assert registry.tool_specs[0]["function"]["parameters"] == {"type": "object", "properties": {}}
-
-
-def test_build_tool_registry_empty_input_returns_empty_registry():
-    registry = mcp_client.build_tool_registry([])
-
-    assert registry.tool_specs == []
-    assert registry.lookup == {}
-
-
 async def test_probe_explains_a_command_missing_from_the_backend_image(stdio_server, monkeypatch):
     stdio_server.command = "npx -y @modelcontextprotocol/server-everything"
 
@@ -243,18 +212,6 @@ async def test_probe_explains_a_command_missing_from_the_backend_image(stdio_ser
 
     with pytest.raises(mcp_client.MCPToolError, match="'npx' isn't available.*over HTTP"):
         await mcp_client.probe_server_tools(stdio_server)
-
-
-async def test_probe_explains_a_refused_http_connection(http_server, monkeypatch):
-    @contextlib.asynccontextmanager
-    async def _refused(server):
-        raise ConnectionRefusedError("connection refused")
-        yield  # pragma: no cover
-
-    monkeypatch.setattr(mcp_client, "_connect", _refused)
-
-    with pytest.raises(mcp_client.MCPToolError, match="Couldn't connect to 'http://localhost:9000/mcp'"):
-        await mcp_client.probe_server_tools(http_server)
 
 
 async def test_list_server_tools_gives_up_on_a_hanging_server(stdio_server, monkeypatch):

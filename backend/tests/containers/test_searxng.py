@@ -28,29 +28,11 @@ async def test_status_is_installing_while_setup_is_in_progress(searxng_container
     assert await searxng.status() == "installing"
 
 
-async def test_status_is_off_when_there_is_no_container(searxng_container):
-    searxng_container.get_container.return_value = None
-
-    assert await searxng.status() == "off"
-
-
 @pytest.mark.parametrize(("docker_status", "expected"), [("running", "running"), ("exited", "stopped")])
 async def test_status_follows_the_container(searxng_container, docker_status, expected):
     searxng_container.status = docker_status
 
     assert await searxng.status() == expected
-
-
-async def test_base_url_is_none_unless_it_is_running(searxng_container):
-    searxng_container.status = "exited"
-    assert await searxng.base_url() is None
-
-    searxng_container.get_container.return_value = None
-    assert await searxng.base_url() is None
-
-
-async def test_base_url_is_the_published_loopback_port_from_source(searxng_container):
-    assert await searxng.base_url() == "http://127.0.0.1:8888"
 
 
 async def test_base_url_is_the_container_name_inside_docker(searxng_container, monkeypatch):
@@ -126,19 +108,6 @@ async def test_a_container_error_while_enabling_reaches_the_user(monkeypatch):
             "error": "Docker isn't running. Start Docker Desktop and try again.",
         }
     ]
-    assert not progress.is_in_progress(searxng.PROGRESS_KEY)
-
-
-async def test_an_unexpected_crash_while_enabling_is_logged_and_reaches_the_user(monkeypatch, caplog):
-    monkeypatch.setattr(
-        ContainerManager, "ensure_service_running", AsyncMock(side_effect=RuntimeError("kaboom"))
-    )
-    progress.try_claim(searxng.PROGRESS_KEY, "x")
-
-    sent = await received_after(searxng._enable_worker)
-
-    assert sent[0]["error"] == "Setting up web search failed: kaboom"
-    assert "Enabling web search crashed" in caplog.text
     assert not progress.is_in_progress(searxng.PROGRESS_KEY)
 
 

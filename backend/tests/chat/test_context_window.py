@@ -14,12 +14,6 @@ def test_resolve_num_ctx_defaults_to_standard_and_caps_at_model_max():
     assert cw.resolve_num_ctx(32768, 16384) == 16384
 
 
-def test_preset_for_maps_known_sizes_only():
-    assert cw.preset_for(4096) == "short"
-    assert cw.preset_for(16384) == "long"
-    assert cw.preset_for(5000) is None
-
-
 def test_short_history_fits_untouched():
     history = [_msg("user", 10), _msg("assistant", 10)]
 

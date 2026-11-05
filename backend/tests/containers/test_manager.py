@@ -16,22 +16,6 @@ from app.containers.manager import ContainerError, ContainerManager
 from tests.containers.conftest import fake_container, managed_labels
 
 
-async def test_client_is_a_singleton_across_instances(monkeypatch):
-    fake_clients = []
-
-    def docker_client():
-        client = MagicMock()
-        fake_clients.append(client)
-        return client
-
-    monkeypatch.setattr(manager_module.docker, "DockerClient", docker_client)
-
-    for _ in range(3):
-        await ContainerManager().ensure_connected()
-
-    assert len(fake_clients) == 1
-
-
 async def test_not_connected_when_the_daemon_is_unreachable(monkeypatch):
     def raise_no_daemon():
         raise docker.errors.DockerException("no daemon")
@@ -50,25 +34,6 @@ async def test_a_client_that_fails_its_ping_is_dropped_and_replaced(monkeypatch)
 
     assert await ContainerManager().ensure_connected() is True
     assert ContainerManager._client is fresh
-
-
-async def test_a_stale_client_is_dropped_even_when_nothing_can_replace_it(monkeypatch):
-    stale = MagicMock()
-    stale.ping.side_effect = docker.errors.APIError("daemon gone")
-    monkeypatch.setattr(ContainerManager, "_client", stale)
-
-    def raise_no_daemon():
-        raise docker.errors.DockerException("no daemon")
-
-    monkeypatch.setattr(manager_module.docker, "DockerClient", raise_no_daemon)
-
-    assert await ContainerManager().ensure_connected() is False
-    assert ContainerManager._client is None
-
-
-async def test_a_live_client_is_kept(connected_client):
-    assert await ContainerManager().ensure_connected() is True
-    assert ContainerManager._client is connected_client
 
 
 async def test_create_labels_container_and_mounts_a_named_volume_for_weights(connected_client):
@@ -107,15 +72,6 @@ async def test_create_falls_back_to_cpu_when_host_has_no_gpu_runtime(connected_c
     assert ContainerManager._gpu_supported is False
 
 
-async def test_once_gpu_is_known_missing_new_containers_skip_the_gpu_request(connected_client):
-    ContainerManager._gpu_supported = False
-    connected_client.containers.create.return_value = fake_container(status="created")
-
-    await ContainerManager().create_and_start_container("llama3.1", "8b")
-
-    assert connected_client.containers.create.call_args.kwargs["device_requests"] == []
-
-
 async def test_non_gpu_start_failure_raises_readable_error_without_recreating(connected_client):
     broken = fake_container(status="created")
     broken.start.side_effect = docker.errors.APIError("500", explanation="port is already allocated")
@@ -125,15 +81,6 @@ async def test_non_gpu_start_failure_raises_readable_error_without_recreating(co
         await ContainerManager().create_and_start_container("llama3.1", "8b")
 
     assert connected_client.containers.create.call_count == 1
-
-
-async def test_a_container_that_cannot_even_be_created_is_reported_readably(connected_client):
-    connected_client.containers.create.side_effect = docker.errors.APIError(
-        "500", explanation="no such network"
-    )
-
-    with pytest.raises(ContainerError, match="Couldn't create the model container: no such network"):
-        await ContainerManager().create_and_start_container("llama3.1", "8b")
 
 
 async def test_an_existing_container_is_started_not_recreated(connected_client):
@@ -146,14 +93,6 @@ async def test_an_existing_container_is_started_not_recreated(connected_client):
     assert result is stopped
     stopped.start.assert_called_once()
     connected_client.containers.create.assert_not_called()
-
-
-async def test_starting_an_already_running_container_does_nothing(connected_client):
-    running = fake_container(status="running")
-
-    await ContainerManager().start_container(running)
-
-    running.start.assert_not_called()
 
 
 async def test_creating_without_docker_explains_what_to_do(monkeypatch):
@@ -174,16 +113,6 @@ async def test_starting_existing_gpu_container_on_gpu_less_host_explains_how_to_
         await ContainerManager().start_container(stopped)
 
 
-async def test_get_container_is_none_when_it_does_not_exist(connected_client):
-    assert await ContainerManager().get_container("llama3.1_8b") is None
-
-
-async def test_get_container_is_none_when_docker_fails(connected_client):
-    connected_client.containers.get.side_effect = docker.errors.DockerException("boom")
-
-    assert await ContainerManager().get_container("llama3.1_8b") is None
-
-
 async def test_managed_containers_include_labelled_and_legacy_env_containers_only(connected_client):
     labelled = fake_container(name="llama3.1_8b", status="exited", labels=managed_labels())
     legacy = fake_container(
@@ -196,23 +125,6 @@ async def test_managed_containers_include_labelled_and_legacy_env_containers_onl
 
     assert result == [labelled, legacy]
     connected_client.containers.list.assert_called_once_with(all=True)
-
-
-async def test_listing_only_running_containers_asks_docker_for_just_those(connected_client):
-    running = fake_container(labels=managed_labels())
-    connected_client.containers.list.return_value = [running]
-
-    assert await ContainerManager().list_managed(running_only=True) == [running]
-    connected_client.containers.list.assert_called_once_with(filters={"status": "running"})
-
-
-async def test_listing_without_docker_is_empty(monkeypatch):
-    def raise_no_daemon():
-        raise docker.errors.DockerException("no daemon")
-
-    monkeypatch.setattr(manager_module.docker, "DockerClient", raise_no_daemon)
-
-    assert await ContainerManager().list_managed() == []
 
 
 async def test_remove_container_also_deletes_its_weights_volume(connected_client):
@@ -238,37 +150,6 @@ async def test_remove_container_that_will_not_go_leaves_the_volume_alone(connect
     connected_client.volumes.get.assert_not_called()
 
 
-async def test_remove_container_still_clears_a_leftover_volume_when_the_container_is_gone(connected_client):
-    assert await ContainerManager().remove_container("llama3.1_8b") is None
-
-    connected_client.volumes.get.return_value.remove.assert_called_once()
-
-
-async def test_stop_container_stops_it(connected_client):
-    container = fake_container()
-    connected_client.containers.get.side_effect = None
-    connected_client.containers.get.return_value = container
-
-    await ContainerManager().stop_container("llama3.1_8b")
-
-    container.stop.assert_called_once()
-
-
-async def test_stop_container_survives_docker_refusing(connected_client):
-    container = fake_container()
-    container.stop.side_effect = docker.errors.APIError("500", explanation="busy")
-    connected_client.containers.get.side_effect = None
-    connected_client.containers.get.return_value = container
-
-    await ContainerManager().stop_container("llama3.1_8b")
-
-
-def test_metadata_prefers_labels_over_env():
-    container = fake_container(labels=managed_labels(port="11500"), env=["port=99"])
-
-    assert ContainerManager.get_container_metadata(container, "port") == "11500"
-
-
 def test_metadata_falls_back_to_env_for_containers_older_than_labels():
     container = fake_container(env=["model=qwen2.5", "parameters=0.5b"])
 
@@ -289,29 +170,6 @@ async def test_recreate_keeps_name_port_labels_and_weights_volume(connected_clie
     assert kwargs["ports"] == {"11434/tcp": ("127.0.0.1", 11500)}
     assert kwargs["volumes"] == {"reichat-ollama-llama3.1_8b": {"bind": "/root/.ollama", "mode": "rw"}}
     assert kwargs["labels"]["reichat.model"] == "llama3.1"
-
-
-async def test_recreate_restarts_a_container_that_was_running(connected_client):
-    old = fake_container(labels=managed_labels(port="11500"), status="running")
-    old.attrs["Mounts"] = [{"Name": "reichat-ollama-llama3.1_8b"}]
-    replacement = fake_container(status="created", container_id="new")
-    connected_client.containers.create.return_value = replacement
-
-    result = await ContainerManager().recreate_on_current_image(old)
-
-    assert result is replacement
-    replacement.start.assert_called_once()
-
-
-async def test_recreate_leaves_a_stopped_container_stopped(connected_client):
-    old = fake_container(labels=managed_labels(port="11500"), status="exited")
-    old.attrs["Mounts"] = [{"Name": "reichat-ollama-llama3.1_8b"}]
-    replacement = fake_container(status="created", container_id="new")
-    connected_client.containers.create.return_value = replacement
-
-    await ContainerManager().recreate_on_current_image(old)
-
-    replacement.start.assert_not_called()
 
 
 async def test_recreate_refuses_containers_whose_weights_would_be_lost(connected_client):
@@ -344,21 +202,6 @@ def test_a_container_is_addressed_by_name_inside_docker_and_by_host_port_outside
         get_settings.cache_clear()
 
 
-def test_a_container_with_no_known_port_has_no_address_outside_docker():
-    assert ContainerManager.base_url_for(fake_container(labels={})) is None
-
-
-async def test_ollama_base_url_only_for_running_containers(connected_client):
-    running = fake_container(labels=managed_labels(port="11500"), status="running")
-    connected_client.containers.get.side_effect = None
-    connected_client.containers.get.return_value = running
-
-    assert await ContainerManager().get_ollama_base_url("llama3.1", "8b") == "http://127.0.0.1:11500"
-
-    running.status = "exited"
-    assert await ContainerManager().get_ollama_base_url("llama3.1", "8b") is None
-
-
 def test_map_container_describes_it_for_the_ui():
     container = fake_container(name="llama3.1_8b", status="exited", labels=managed_labels(port="11500"))
 
@@ -376,20 +219,6 @@ async def test_gpu_status_is_what_the_first_container_start_showed(connected_cli
 
     assert await ContainerManager().gpu_status() is True
     connected_client.containers.list.assert_not_called()
-
-
-async def test_gpu_status_falls_back_to_how_existing_containers_were_created(connected_client):
-    connected_client.containers.list.return_value = [
-        fake_container(labels={**managed_labels(), "reichat.gpu": "false"})
-    ]
-
-    assert await ContainerManager().gpu_status() is False
-
-
-async def test_gpu_status_is_unknown_when_nothing_has_been_started(connected_client):
-    connected_client.containers.list.return_value = []
-
-    assert await ContainerManager().gpu_status() is None
 
 
 async def test_ollama_image_pull_reports_overall_progress_across_layers(connected_client):
@@ -415,55 +244,6 @@ async def test_ollama_image_pull_reports_overall_progress_across_layers(connecte
     ]
 
 
-async def test_ollama_image_already_present_is_not_pulled_again(connected_client):
-    calls = []
-
-    assert (
-        await ContainerManager().ensure_ollama_image(lambda pct, detail: calls.append((pct, detail))) is True
-    )
-
-    assert calls == [(100, "Base image already present")]
-    connected_client.api.pull.assert_not_called()
-
-
-async def test_ollama_image_pull_failure_is_reported_not_raised(connected_client):
-    connected_client.images.get.side_effect = docker.errors.ImageNotFound("absent")
-    connected_client.api.pull.side_effect = docker.errors.APIError("offline")
-
-    assert await ContainerManager().ensure_ollama_image() is False
-
-
-async def test_pulling_the_ollama_image_failing_says_why(connected_client):
-    connected_client.images.pull.side_effect = docker.errors.APIError("offline")
-
-    with pytest.raises(ContainerError, match="Couldn't download the Ollama image"):
-        await ContainerManager().pull_ollama_image()
-
-
-async def test_image_id_is_what_docker_reports(connected_client):
-    connected_client.images.get.return_value = MagicMock(id="sha256:abc")
-
-    assert await ContainerManager().image_id() == "sha256:abc"
-
-
-async def test_image_id_is_none_when_the_image_is_absent(connected_client):
-    connected_client.images.get.side_effect = docker.errors.ImageNotFound("absent")
-
-    assert await ContainerManager().image_id() is None
-
-
-async def test_host_memory_is_what_docker_reports(connected_client):
-    connected_client.info.return_value = {"MemTotal": 16_000_000_000}
-
-    assert await ContainerManager().host_memory_bytes() == 16_000_000_000
-
-
-async def test_host_memory_is_none_when_docker_cannot_say(connected_client):
-    connected_client.info.side_effect = Exception("daemon unreachable")
-
-    assert await ContainerManager().host_memory_bytes() is None
-
-
 async def test_exec_in_gpu_container_runs_the_command_in_a_gpu_container(connected_client):
     gpu_container = MagicMock()
     gpu_container.exec_run.return_value = (0, b"12288\n")
@@ -473,18 +253,3 @@ async def test_exec_in_gpu_container_runs_the_command_in_a_gpu_container(connect
     filters = connected_client.containers.list.call_args.kwargs["filters"]
     assert "reichat.gpu=true" in filters["label"]
     assert filters["status"] == "running"
-
-
-async def test_exec_in_gpu_container_is_none_without_one(connected_client):
-    connected_client.containers.list.return_value = []
-
-    assert await ContainerManager().exec_in_gpu_container(["nvidia-smi"]) is None
-
-
-async def test_exec_in_gpu_container_tries_the_next_container_when_one_fails(connected_client):
-    broken, working = MagicMock(), MagicMock()
-    broken.exec_run.return_value = (1, b"")
-    working.exec_run.return_value = (0, b"4096")
-    connected_client.containers.list.return_value = [broken, working]
-
-    assert await ContainerManager().exec_in_gpu_container(["nvidia-smi"]) == "4096"

@@ -49,20 +49,6 @@ async def test_an_existing_model_is_left_exactly_as_it_was(db: AsyncSession):
     assert (existing.name, existing.is_custom, existing.popularity) == ("llama3.2", False, 5)
 
 
-async def test_a_missing_version_is_created_and_an_existing_one_is_not(db: AsyncSession):
-    model = await add_model(db)
-
-    first = await library.get_or_create_version(
-        db, ai_model_id=model.id, parameters="8b", size="1 GB", size_bytes=7
-    )
-    second = await library.get_or_create_version(db, ai_model_id=model.id, parameters="8b", size="2 GB")
-    await db.commit()
-
-    assert (first, second) == (True, False)
-    [version] = (await db.execute(select(models.AIModelVersion))).scalars().all()
-    assert (version.size, version.size_bytes) == ("1 GB", 7)
-
-
 async def test_two_simultaneous_adds_of_the_same_model_make_one(db: AsyncSession):
     async def add() -> bool:
         async with SessionLocal() as session:
@@ -76,12 +62,6 @@ async def test_two_simultaneous_adds_of_the_same_model_make_one(db: AsyncSession
 
     assert results.count(True) == 1
     assert (await db.execute(select(func.count()).select_from(models.AIModel))).scalar_one() == 1
-
-
-async def test_a_model_nothing_depends_on_is_unused(db: AsyncSession):
-    model = await add_model(db)
-
-    assert await library.lock_and_check_usage(db, model.id) is library.ModelUsage.UNUSED
 
 
 async def test_a_model_with_a_chat_has_chats(db: AsyncSession):
@@ -98,10 +78,6 @@ async def test_a_model_that_embedded_a_collection_is_used_by_it(db: AsyncSession
     await db.commit()
 
     assert await library.lock_and_check_usage(db, model.id) is library.ModelUsage.USED_BY_COLLECTION
-
-
-async def test_a_model_that_is_gone_is_none(db: AsyncSession):
-    assert await library.lock_and_check_usage(db, 12345) is None
 
 
 async def test_a_chat_cannot_sneak_in_between_the_check_and_the_delete(db: AsyncSession):

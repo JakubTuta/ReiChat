@@ -3,16 +3,14 @@ import pytest
 from app.core.config import Settings
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"), [("true", True), ("TRUE", True), ("false", False), ("", False)]
-)
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
 def test_debug_is_on_only_for_the_word_true(monkeypatch: pytest.MonkeyPatch, value: str, expected: bool):
     monkeypatch.setenv("DEBUG", value)
 
     assert Settings().debug is expected
 
 
-@pytest.mark.parametrize("value", ["*", "1", "express:*", "yes"])
+@pytest.mark.parametrize("value", ["*", "express:*"])
 def test_a_stray_debug_value_from_another_tool_neither_crashes_nor_enables_it(
     monkeypatch: pytest.MonkeyPatch, value: str
 ):

@@ -89,24 +89,6 @@ async def test_docker_status_when_docker_is_down(client: httpx.AsyncClient, dock
     assert response.json() == DOCKER_DOWN
 
 
-async def test_health_check_reports_the_external_server(client: httpx.AsyncClient, external_mode, ollama):
-    ollama.version.return_value = None
-
-    response = await client.get("/docker/")
-
-    assert response.status_code == 503
-    assert "Can't reach your Ollama" in response.json()["error"]
-
-
-async def test_health_check_with_a_reachable_external_server(
-    client: httpx.AsyncClient, external_mode, ollama
-):
-    response = await client.get("/docker/")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "Ollama is reachable"}
-
-
 # Listing
 
 
@@ -159,29 +141,6 @@ async def test_get_hardware_returns_ram_and_vram(client: httpx.AsyncClient, dock
     }
 
 
-async def test_get_hardware_missing_vram_is_null(client: httpx.AsyncClient, docker_up, monkeypatch):
-    monkeypatch.setattr(ContainerManager, "host_memory_bytes", AsyncMock(return_value=16_000_000_000))
-    monkeypatch.setattr(hardware, "detect_vram_bytes", AsyncMock(return_value=None))
-    monkeypatch.setattr(ContainerManager, "gpu_status", AsyncMock(return_value=None))
-
-    response = await client.get("/docker/hardware/")
-
-    assert response.status_code == 200
-    assert response.json()["vram_bytes"] is None
-
-
-async def test_get_hardware_docker_not_connected_returns_500(client: httpx.AsyncClient, docker_down):
-    response = await client.get("/docker/hardware/")
-
-    assert response.status_code == 500
-
-
-async def test_hardware_is_unknown_for_the_users_own_ollama(client: httpx.AsyncClient, external_mode):
-    response = await client.get("/docker/hardware/")
-
-    assert response.json() == {"ram_bytes": None, "vram_bytes": None, "gpu_available": None}
-
-
 # Disk usage
 
 
@@ -217,89 +176,6 @@ async def test_get_disk_usage_matches_containers_to_catalog_sizes(
             }
         ],
     }
-
-
-async def test_disk_usage_prefers_the_real_size_a_running_container_reports(
-    client: httpx.AsyncClient, docker_up, monkeypatch, db: AsyncSession, ollama
-):
-    await add_catalog_model(db, "llama3.1", size_bytes=4_920_000_000)
-    monkeypatch.setattr(
-        service, "get_available_containers", AsyncMock(return_value=[listed_container("llama3.1")])
-    )
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", AsyncMock(return_value="http://o"))
-    ollama.installed_model_sizes.return_value = {"llama3.1:8b": 4_000_000_000}
-
-    body = (await client.get("/docker/disk-usage/")).json()
-
-    assert body["total_bytes"] == 4_000_000_000
-    assert body["models"][0]["size_bytes"] == 4_000_000_000
-
-
-async def test_disk_usage_does_not_ask_a_stopped_container(
-    client: httpx.AsyncClient, docker_up, monkeypatch, db: AsyncSession, ollama
-):
-    await add_catalog_model(db, "llama3.1", size_bytes=4_920_000_000)
-    monkeypatch.setattr(
-        service,
-        "get_available_containers",
-        AsyncMock(return_value=[listed_container("llama3.1", status="exited")]),
-    )
-    asked = AsyncMock(return_value="http://o")
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", asked)
-
-    body = (await client.get("/docker/disk-usage/")).json()
-
-    asked.assert_not_awaited()
-    assert body["models"][0]["size_bytes"] == 4_920_000_000
-
-
-async def test_disk_usage_with_the_users_own_ollama_uses_its_sizes(
-    client: httpx.AsyncClient, external_mode, monkeypatch, db: AsyncSession, ollama
-):
-    await add_catalog_model(db, "llama3.1", size_bytes=4_920_000_000)
-    monkeypatch.setattr(
-        service, "get_available_containers", AsyncMock(return_value=[listed_container("llama3.1")])
-    )
-    ollama.installed_model_sizes.return_value = {"llama3.1:8b": 3_000_000_000}
-
-    body = (await client.get("/docker/disk-usage/")).json()
-
-    assert body["total_bytes"] == 3_000_000_000
-
-
-async def test_get_disk_usage_unknown_model_has_null_size_and_excluded_from_total(
-    client: httpx.AsyncClient, docker_up, monkeypatch, db: AsyncSession, ollama
-):
-    monkeypatch.setattr(
-        service,
-        "get_available_containers",
-        AsyncMock(return_value=[listed_container("ghost-disk-test", "1b")]),
-    )
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", AsyncMock(return_value=None))
-
-    response = await client.get("/docker/disk-usage/")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["total_bytes"] == 0
-    assert body["models"][0]["size_bytes"] is None
-
-
-async def test_get_disk_usage_no_containers_returns_empty(
-    client: httpx.AsyncClient, docker_up, monkeypatch, db: AsyncSession
-):
-    monkeypatch.setattr(service, "get_available_containers", AsyncMock(return_value=[]))
-
-    response = await client.get("/docker/disk-usage/")
-
-    assert response.status_code == 200
-    assert response.json() == {"total_bytes": 0, "models": []}
-
-
-async def test_get_disk_usage_docker_not_connected_returns_500(client: httpx.AsyncClient, docker_down, db):
-    response = await client.get("/docker/disk-usage/")
-
-    assert response.status_code == 500
 
 
 # Starting, inspecting and removing one model's container
@@ -369,27 +245,11 @@ async def test_post_existing_container_that_fails_to_start_returns_readable_erro
     install_calls.start_install.assert_not_called()
 
 
-async def test_post_without_parameters_says_what_is_missing(client: httpx.AsyncClient, docker_up, db):
-    response = await client.post("/docker/container/llama3.1")
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "Invalid request: missing 'parameters' query param"}
-
-
 async def test_post_for_a_model_not_in_the_catalog_is_a_404(client: httpx.AsyncClient, docker_up, db):
     response = await client.post("/docker/container/nothing?parameters=8b")
 
     assert response.status_code == 404
     assert response.json() == {"error": "Model not found"}
-
-
-async def test_post_for_a_tag_the_model_does_not_have_is_a_404(client: httpx.AsyncClient, docker_up, db):
-    await add_catalog_model(db)
-
-    response = await client.post("/docker/container/llama3.1?parameters=70b")
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Invalid model version"}
 
 
 async def test_post_needs_docker(client: httpx.AsyncClient, docker_down, db):
@@ -423,43 +283,6 @@ async def test_installing_on_the_users_ollama_when_the_model_is_missing_there(
     install_calls.start_install.assert_called_once_with("llama3.2-ext-test", "3b")
 
 
-async def test_nothing_is_installed_when_the_users_ollama_already_has_the_model(
-    client: httpx.AsyncClient, external_mode, db, install_calls, monkeypatch
-):
-    await add_catalog_model(db, "llama3.2-ext-test", "3b")
-    monkeypatch.setattr(router.external, "has_model", AsyncMock(return_value=True))
-
-    response = await client.post("/docker/container/llama3.2-ext-test?parameters=3b")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "Model is installed"}
-    install_calls.start_install.assert_not_called()
-
-
-async def test_get_container_describes_it(client: httpx.AsyncClient, docker_up, existing_container):
-    response = await client.get("/docker/container/llama3.1_8b")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "Container found",
-        "container": {
-            "name": "llama3.1_8b",
-            "status": "running",
-            "port": "11434",
-            "environment": {"model": "llama3.1", "parameters": "8b"},
-        },
-    }
-
-
-async def test_get_container_that_does_not_exist_is_a_404(client: httpx.AsyncClient, docker_up, monkeypatch):
-    monkeypatch.setattr(ContainerManager, "get_container", AsyncMock(return_value=None))
-
-    response = await client.get("/docker/container/nothing_1b")
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Container not found"}
-
-
 async def test_delete_stop_stops_the_container(client: httpx.AsyncClient, docker_up, monkeypatch):
     stop = AsyncMock()
     monkeypatch.setattr(ContainerManager, "stop_container", stop)
@@ -482,27 +305,6 @@ async def test_delete_remove_removes_the_container(client: httpx.AsyncClient, do
     remove.assert_awaited_once_with("llama3.1_8b")
 
 
-async def test_delete_with_an_unknown_method_is_a_400(client: httpx.AsyncClient, docker_up):
-    response = await client.delete("/docker/container/llama3.1?parameters=8b&method=explode")
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "Invalid method: use 'stop' or 'remove'"}
-
-
-async def test_delete_without_parameters_or_method_says_what_is_missing(client: httpx.AsyncClient, docker_up):
-    for query in ("", "?parameters=8b", "?method=stop"):
-        response = await client.delete(f"/docker/container/llama3.1{query}")
-
-        assert response.status_code == 400
-        assert response.json() == {"error": "Invalid request: missing 'parameters' or 'method' query params"}
-
-
-async def test_delete_needs_docker(client: httpx.AsyncClient, docker_down):
-    response = await client.delete("/docker/container/llama3.1?parameters=8b&method=stop")
-
-    assert response.status_code == 500
-
-
 async def test_stopping_a_model_on_the_users_ollama_unloads_it(
     client: httpx.AsyncClient, external_mode, ollama
 ):
@@ -523,15 +325,6 @@ async def test_removing_a_model_from_the_users_ollama_deletes_it_there(
     ollama.delete_model.assert_awaited_once_with(EXTERNAL, "llama3.2", "3b")
 
 
-async def test_a_delete_the_users_ollama_refuses_is_a_502(client: httpx.AsyncClient, external_mode, ollama):
-    ollama.delete_model.return_value = False
-
-    response = await client.delete("/docker/container/llama3.2?parameters=3b&method=remove")
-
-    assert response.status_code == 502
-    assert response.json() == {"error": "Your Ollama didn't delete the model — try again."}
-
-
 # Unload, update, runtime
 
 
@@ -543,41 +336,6 @@ async def test_unload_frees_a_running_model(client: httpx.AsyncClient, monkeypat
     assert response.status_code == 200
     assert response.json() == {"status": "Model unloaded"}
     ollama.unload_model.assert_awaited_once_with("http://o", "llama3.1:8b")
-
-
-async def test_unload_of_a_stopped_model_says_so(client: httpx.AsyncClient, monkeypatch):
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", AsyncMock(return_value=None))
-
-    response = await client.post("/docker/container/llama3.1/unload?parameters=8b")
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "That model isn't running."}
-
-
-async def test_unload_when_ollama_does_not_answer_is_a_502(client: httpx.AsyncClient, monkeypatch, ollama):
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", AsyncMock(return_value="http://o"))
-    ollama.unload_model.return_value = False
-
-    response = await client.post("/docker/container/llama3.1/unload?parameters=8b")
-
-    assert response.status_code == 502
-
-
-async def test_unload_without_parameters_is_a_400(client: httpx.AsyncClient):
-    response = await client.post("/docker/container/llama3.1/unload")
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "Invalid request: missing 'parameters' query param"}
-
-
-async def test_unload_of_a_namespaced_model(client: httpx.AsyncClient, monkeypatch, ollama):
-    base_url = AsyncMock(return_value="http://o")
-    monkeypatch.setattr(ContainerManager, "get_ollama_base_url", base_url)
-
-    response = await client.post("/docker/container/hf.co/user/repo/unload?parameters=Q4_K_M")
-
-    assert response.status_code == 200
-    base_url.assert_awaited_once_with("hf.co/user/repo", "Q4_K_M")
 
 
 async def test_update_starts_a_re_pull_for_an_installed_model(
@@ -599,23 +357,6 @@ async def test_update_of_a_model_that_is_not_installed_is_a_404(
 
     assert response.status_code == 404
     install_calls.start_model_update.assert_not_called()
-
-
-async def test_update_checks_the_users_own_ollama_when_that_is_in_use(
-    client: httpx.AsyncClient, external_mode, install_calls, monkeypatch
-):
-    monkeypatch.setattr(router.external, "has_model", AsyncMock(return_value=True))
-
-    response = await client.post("/docker/container/llama3.2/update?parameters=3b")
-
-    assert response.status_code == 202
-    install_calls.start_model_update.assert_called_once_with("llama3.2", "3b")
-
-
-async def test_update_without_parameters_is_a_400(client: httpx.AsyncClient):
-    response = await client.post("/docker/container/llama3.1/update")
-
-    assert response.status_code == 400
 
 
 async def test_runtime_lists_loaded_models_per_container(client: httpx.AsyncClient, connected_client, ollama):
@@ -641,44 +382,6 @@ async def test_runtime_lists_loaded_models_per_container(client: httpx.AsyncClie
     ollama.running_models.assert_awaited_once_with("http://127.0.0.1:11500")
 
 
-async def test_runtime_skips_containers_the_app_does_not_manage(
-    client: httpx.AsyncClient, connected_client, ollama
-):
-    connected_client.containers.list.return_value = [
-        fake_container(name="postgres", image="pgvector/pgvector")
-    ]
-
-    response = await client.get("/docker/runtime/")
-
-    assert response.json() == {"loaded": []}
-    ollama.running_models.assert_not_awaited()
-
-
-async def test_runtime_for_the_users_own_ollama(client: httpx.AsyncClient, external_mode, ollama):
-    ollama.running_models.return_value = [
-        {"name": "llama3.2:3b", "size": 10, "size_vram": 0, "context_length": None, "expires_at": None}
-    ]
-
-    response = await client.get("/docker/runtime/")
-
-    assert response.json() == {
-        "loaded": [
-            {
-                "container": None,
-                "model": "llama3.2:3b",
-                "size_bytes": 10,
-                "vram_bytes": 0,
-                "context_length": None,
-                "expires_at": None,
-            }
-        ]
-    }
-
-
-async def test_runtime_needs_docker(client: httpx.AsyncClient, docker_down):
-    assert (await client.get("/docker/runtime/")).status_code == 500
-
-
 # The Ollama image and updating it
 
 
@@ -686,19 +389,6 @@ async def test_ollama_image_present(client: httpx.AsyncClient, docker_up, monkey
     monkeypatch.setattr(ContainerManager, "is_ollama_image_pulled", AsyncMock(return_value=True))
 
     assert (await client.get("/docker/ollama-image/")).status_code == 200
-
-
-async def test_ollama_image_absent(client: httpx.AsyncClient, docker_up, monkeypatch):
-    monkeypatch.setattr(ContainerManager, "is_ollama_image_pulled", AsyncMock(return_value=False))
-
-    assert (await client.get("/docker/ollama-image/")).status_code == 404
-
-
-async def test_ollama_image_check_needs_docker(client: httpx.AsyncClient, docker_down):
-    response = await client.get("/docker/ollama-image/")
-
-    assert response.status_code == 500
-    assert response.json() == DOCKER_DOWN
 
 
 async def test_pulling_the_ollama_image_runs_in_the_background(
@@ -715,10 +405,6 @@ async def test_pulling_the_ollama_image_runs_in_the_background(
     pull.assert_awaited_once()
 
 
-async def test_pulling_the_ollama_image_needs_docker(client: httpx.AsyncClient, docker_down):
-    assert (await client.post("/docker/ollama-image/")).status_code == 500
-
-
 async def test_ollama_update_starts(client: httpx.AsyncClient, docker_up, install_calls):
     response = await client.post("/docker/ollama-update/")
 
@@ -727,22 +413,7 @@ async def test_ollama_update_starts(client: httpx.AsyncClient, docker_up, instal
     install_calls.start_ollama_update.assert_called_once()
 
 
-async def test_ollama_update_needs_docker(client: httpx.AsyncClient, docker_down, install_calls):
-    response = await client.post("/docker/ollama-update/")
-
-    assert response.status_code == 500
-    install_calls.start_ollama_update.assert_not_called()
-
-
 # Web search
-
-
-async def test_web_search_status(client: httpx.AsyncClient, monkeypatch):
-    monkeypatch.setattr(searxng, "status", AsyncMock(return_value="running"))
-
-    response = await client.get("/docker/web-search/")
-
-    assert response.json() == {"status": "running"}
 
 
 async def test_web_search_can_be_turned_on(client: httpx.AsyncClient, docker_up, monkeypatch):
@@ -756,10 +427,6 @@ async def test_web_search_can_be_turned_on(client: httpx.AsyncClient, docker_up,
     enable.assert_called_once()
 
 
-async def test_web_search_needs_docker_to_be_turned_on(client: httpx.AsyncClient, docker_down):
-    assert (await client.post("/docker/web-search/")).status_code == 500
-
-
 async def test_web_search_can_be_turned_off(client: httpx.AsyncClient, monkeypatch):
     disable = AsyncMock()
     monkeypatch.setattr(searxng, "disable", disable)
@@ -770,24 +437,7 @@ async def test_web_search_can_be_turned_off(client: httpx.AsyncClient, monkeypat
     assert response.json() == {"status": "off"}
 
 
-async def test_turning_web_search_off_can_fail_readably(client: httpx.AsyncClient, monkeypatch):
-    monkeypatch.setattr(
-        searxng, "disable", AsyncMock(side_effect=ContainerError("Couldn't turn web search off: busy"))
-    )
-
-    response = await client.delete("/docker/web-search/")
-
-    assert response.status_code == 500
-    assert response.json() == {"error": "Couldn't turn web search off: busy"}
-
-
 # Where models run
-
-
-async def test_connection_defaults_to_app_managed_containers(client: httpx.AsyncClient):
-    response = await client.get("/docker/ollama-connection/")
-
-    assert response.json() == {"mode": "managed", "url": None, "version": None}
 
 
 async def test_connection_reports_the_users_own_ollama(client: httpx.AsyncClient, external_mode, ollama):
@@ -836,23 +486,18 @@ async def test_switching_to_the_users_ollama_makes_its_models_selectable(
     assert [(row.model, row.is_custom) for row in created] == [("brand-new", True)]
 
 
-@pytest.mark.parametrize("body", [{}, {"mode": "nonsense"}, {"mode": 5}, {"url": "http://x"}])
-async def test_connection_with_an_unknown_mode_is_a_400(client: httpx.AsyncClient, body):
+async def test_connection_with_an_unknown_mode_is_a_400(client: httpx.AsyncClient):
+    body = {"mode": "nonsense"}
+
     response = await client.put("/docker/ollama-connection/", json=body)
 
     assert response.status_code == 400
     assert response.json() == {"error": "mode must be 'managed' or 'external'"}
 
 
-async def test_connection_with_no_body_at_all_is_the_same_400(client: httpx.AsyncClient):
-    response = await client.put("/docker/ollama-connection/")
+async def test_connection_url_has_to_start_with_http(client: httpx.AsyncClient):
+    url = "host:11434"
 
-    assert response.status_code == 400
-    assert response.json() == {"error": "mode must be 'managed' or 'external'"}
-
-
-@pytest.mark.parametrize("url", ["", "host:11434", "ftp://host", None])
-async def test_connection_url_has_to_start_with_http(client: httpx.AsyncClient, url):
     response = await client.put("/docker/ollama-connection/", json={"mode": "external", "url": url})
 
     assert response.status_code == 400

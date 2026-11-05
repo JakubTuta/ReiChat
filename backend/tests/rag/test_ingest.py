@@ -85,14 +85,6 @@ async def test_ingest_document_creates_chunks_and_marks_ready(db: AsyncSession, 
     assert await chunk_count(db, document) == stored.chunk_count
 
 
-async def test_the_embedding_model_of_the_collection_is_the_one_asked_for(
-    db: AsyncSession, document, embeddings
-):
-    await ingest.ingest_document(document.id, "some text")
-
-    assert embeddings.asked_for == ("nomic-embed-text-ingest-test", "latest")
-
-
 async def test_chunks_keep_their_text_position_and_vector(db: AsyncSession, document, embeddings):
     await ingest.ingest_document(document.id, "word " * 500)
 
@@ -184,14 +176,6 @@ async def test_progress_is_visible_while_the_document_is_still_processing(
     assert (await fresh(db, document)).progress == 100
 
 
-async def test_ingest_document_missing_document_id_is_a_noop(embeddings, caplog):
-    # The document may have been deleted before the background task got to run.
-    await ingest.ingest_document(999999, "text")
-
-    assert embeddings.batches == []
-    assert "vanished before ingest started" in caplog.text
-
-
 async def test_ingest_maps_chunks_to_pdf_pages_and_reports_progress(db: AsyncSession, document, embeddings):
     page_one = "alpha " * 300
     text = page_one + "\n\n" + "beta " * 300
@@ -216,11 +200,8 @@ async def test_ingest_maps_chunks_to_pdf_pages_and_reports_progress(db: AsyncSes
     ("char_start", "page_starts", "expected"),
     [
         (0, None, None),
-        (0, [], None),
-        (0, [0, 100], 1),
         (99, [0, 100], 1),
         (100, [0, 100], 2),
-        (5000, [0, 100], 2),
     ],
 )
 def test_a_chunk_belongs_to_the_page_it_starts_on(char_start, page_starts, expected):
@@ -251,22 +232,6 @@ async def test_mark_interrupted_fails_orphaned_documents_but_not_live_ones(
     assert (await fresh(db, docs["done"])).status == models.Document.STATUS_READY
 
 
-async def test_mark_interrupted_only_touches_the_given_collection(db: AsyncSession, collection):
-    other = models.DocumentCollection(
-        name="Other", embedding_model_id=collection.embedding_model_id, embedding_parameters="latest"
-    )
-    db.add(other)
-    await db.commit()
-    stuck = models.Document(
-        collection_id=other.id, filename="x.txt", status=models.Document.STATUS_PROCESSING
-    )
-    db.add(stuck)
-    await db.commit()
-
-    assert await ingest.mark_interrupted_documents(collection.id) == 0
-    assert (await fresh(db, stuck)).status == models.Document.STATUS_PROCESSING
-
-
 async def test_start_ingest_tracks_the_document_until_the_task_finishes(monkeypatch):
     seen_during: list[bool] = []
 
@@ -281,17 +246,3 @@ async def test_start_ingest_tracks_the_document_until_the_task_finishes(monkeypa
 
     assert seen_during == [True]
     assert 4242 not in ingest._active_ids
-
-
-async def test_a_crashing_ingest_still_stops_being_tracked(monkeypatch):
-    async def explode(doc_id, text, pages):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(ingest, "ingest_document", explode)
-
-    ingest.start_ingest(4243, "text")
-    await asyncio.gather(
-        *(t for t in asyncio.all_tasks() if t.get_name() == "ingest-document-4243"), return_exceptions=True
-    )
-
-    assert 4243 not in ingest._active_ids

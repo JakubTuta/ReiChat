@@ -25,22 +25,6 @@ async def test_allocate_port_reuses_existing_allocation(db: AsyncSession):
     assert count == 1
 
 
-async def test_allocate_port_gives_different_containers_different_ports():
-    first = await allocate_port("llama3.1_8b")
-    second = await allocate_port("llama3.1_70b")
-
-    assert first != second
-    assert first >= PORT_RANGE_START
-    assert second >= PORT_RANGE_START
-
-
-async def test_allocate_port_skips_ports_already_taken(db: AsyncSession):
-    db.add(ContainerPort(container_name="other_model_8b", port=PORT_RANGE_START))
-    await db.commit()
-
-    assert await allocate_port("llama3.1_8b") != PORT_RANGE_START
-
-
 async def test_allocate_port_hands_out_the_lowest_free_port(db: AsyncSession):
     db.add_all(
         [

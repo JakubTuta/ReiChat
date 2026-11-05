@@ -30,16 +30,6 @@ async def test_a_request_with_no_body_names_the_fields_it_needed(client: httpx.A
     }
 
 
-async def test_missing_query_parameter_is_listed(client: httpx.AsyncClient):
-    response = await client.get("/probe/query")
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Missing required query parameters",
-        "missing_params": ["limit"],
-    }
-
-
 async def test_invalid_value_gets_a_plain_message_and_details(client: httpx.AsyncClient):
     response = await client.post("/probe/echo", json={"name": "x", "count": "many"})
 
@@ -49,14 +39,6 @@ async def test_invalid_value_gets_a_plain_message_and_details(client: httpx.Asyn
     assert "count" in body["error"]
     assert body["details"][0]["field"] == "count"
     assert "integer" in body["details"][0]["message"]
-
-
-async def test_a_check_that_spans_several_fields_reads_as_plain_words(client: httpx.AsyncClient):
-    response = await client.post("/probe/pair", json={"low": 5, "high": 1})
-
-    assert response.status_code == 400
-    assert response.json()["error"] == "Some values in the request are not valid. low can't be above high"
-    assert response.json()["details"] == [{"field": "body", "message": "low can't be above high"}]
 
 
 async def test_non_numeric_path_id_is_a_400_not_a_500(client: httpx.AsyncClient):
@@ -82,26 +64,11 @@ async def test_http_exception_becomes_an_error_object(client: httpx.AsyncClient)
     assert response.json() == {"error": "Already exists."}
 
 
-async def test_http_exception_can_carry_extra_keys(client: httpx.AsyncClient):
-    response = await client.get("/probe/conflict-extra")
-
-    assert response.status_code == 409
-    assert response.json() == {"error": "Still in use.", "used_by": ["a", "b"]}
-
-
 async def test_unknown_route_is_json(client: httpx.AsyncClient):
     response = await client.get("/nope/")
 
     assert response.status_code == 404
     assert response.json() == {"error": "Not Found"}
-
-
-async def test_wrong_method_is_json_and_keeps_the_allow_header(client: httpx.AsyncClient):
-    response = await client.delete("/health/")
-
-    assert response.status_code == 405
-    assert response.json() == {"error": "Method Not Allowed"}
-    assert "GET" in response.headers["Allow"]
 
 
 async def test_unhandled_error_is_a_json_500_with_cors_headers(

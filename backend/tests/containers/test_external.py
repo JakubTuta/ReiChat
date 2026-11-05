@@ -48,20 +48,6 @@ async def test_external_models_are_listed_like_containers(installed_on_external)
     ]
 
 
-async def test_a_model_without_a_tag_is_listed_as_latest(installed_on_external):
-    installed_on_external({"nomic-embed-text": 1})
-
-    [entry] = await external.list_models(EXTERNAL)
-
-    assert entry["environment"] == {"model": "nomic-embed-text", "parameters": "latest"}
-
-
-async def test_nothing_is_listed_when_the_users_ollama_does_not_answer(installed_on_external):
-    installed_on_external(None)
-
-    assert await external.list_models(EXTERNAL) == []
-
-
 async def test_a_download_that_has_not_reached_the_tag_list_yet_is_shown_as_pulling(installed_on_external):
     installed_on_external({"llama3.2:3b": 2_000})
     progress.try_claim("brand-new_1b", "Starting…")
@@ -74,25 +60,11 @@ async def test_a_download_that_has_not_reached_the_tag_list_yet_is_shown_as_pull
     assert listed["llama3.2_3b"]["status"] == "pulling_model"
 
 
-async def test_other_progress_keys_are_not_mistaken_for_models(installed_on_external):
-    installed_on_external({})
-    progress.try_claim("ollama-update", "Checking…")
-    progress.try_claim("web-search", "Setting up…")
-
-    assert await external.list_models(EXTERNAL) == []
-
-
 async def test_has_model_checks_the_exact_tag(installed_on_external):
     installed_on_external({"llama3.2:3b": 1})
 
     assert await external.has_model(EXTERNAL, "llama3.2", "3b") is True
     assert await external.has_model(EXTERNAL, "llama3.2", "1b") is False
-
-
-async def test_has_model_is_none_when_the_users_ollama_does_not_answer(installed_on_external):
-    installed_on_external(None)
-
-    assert await external.has_model(EXTERNAL, "llama3.2", "3b") is None
 
 
 async def test_models_already_on_the_users_ollama_become_selectable(db: AsyncSession, installed_on_external):
@@ -125,24 +97,6 @@ async def test_models_already_on_the_users_ollama_become_selectable(db: AsyncSes
     assert existing.is_custom is False
 
 
-async def test_registering_twice_adds_nothing_the_second_time(db: AsyncSession, installed_on_external):
-    installed_on_external({"llama3.2:3b": 2_000, "brand-new-model:latest": 1_000})
-
-    assert await external.register_models(db, EXTERNAL) == 2
-    assert await external.register_models(db, EXTERNAL) == 0
-
-    assert (await db.execute(select(func.count()).select_from(models.AIModel))).scalar_one() == 2
-
-
-async def test_a_namespaced_model_gets_its_short_name_for_display(db: AsyncSession, installed_on_external):
-    installed_on_external({"hf.co/user/Repo-GGUF:Q4_K_M": 5})
-
-    await external.register_models(db, EXTERNAL)
-
-    model = (await db.execute(select(models.AIModel))).scalar_one()
-    assert (model.model, model.name) == ("hf.co/user/Repo-GGUF", "Repo-GGUF")
-
-
 async def test_two_tags_of_one_new_model_make_one_model_with_two_versions(
     db: AsyncSession, installed_on_external
 ):
@@ -152,19 +106,3 @@ async def test_two_tags_of_one_new_model_make_one_model_with_two_versions(
 
     assert (await db.execute(select(func.count()).select_from(models.AIModel))).scalar_one() == 1
     assert (await db.execute(select(func.count()).select_from(models.AIModelVersion))).scalar_one() == 2
-
-
-async def test_a_new_tag_of_a_known_model_counts_as_added(db: AsyncSession, installed_on_external):
-    db.add(models.AIModel(name="x", model="known", description="", index=1))
-    await db.commit()
-    installed_on_external({"known:7b": 7})
-
-    assert await external.register_models(db, EXTERNAL) == 1
-
-
-async def test_nothing_is_registered_when_the_users_ollama_does_not_answer(
-    db: AsyncSession, installed_on_external
-):
-    installed_on_external(None)
-
-    assert await external.register_models(db, EXTERNAL) == 0

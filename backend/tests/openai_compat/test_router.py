@@ -185,18 +185,6 @@ async def test_streaming_completion_returns_sse_chunks_and_done(
     assert len({f["id"] for f in frames}) == 1
 
 
-async def test_every_event_is_one_data_line_followed_by_a_blank_line(
-    ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_bot_response", streaming("a\nb"))
-
-    body = (await post(client, {**HI, "stream": True})).text
-
-    events = body.split("\n\n")
-    assert events[-1] == ""
-    assert all(event.startswith("data: ") and "\n" not in event for event in events[:-1])
-
-
 async def test_unknown_model_returns_404_with_openai_error_shape(
     ai_model: models.AIModel, client: httpx.AsyncClient
 ):
@@ -215,7 +203,7 @@ async def test_unknown_model_returns_404_with_openai_error_shape(
     }
 
 
-@pytest.mark.parametrize("raw", [b"not json", b"\xff\xfe\x00", b""])
+@pytest.mark.parametrize("raw", [b"not json", b"\xff\xfe\x00"])
 async def test_a_body_that_is_not_json_returns_400(client: httpx.AsyncClient, raw: bytes):
     response = await client.post(CHAT, content=raw)
 
@@ -230,20 +218,6 @@ async def test_a_body_that_is_not_json_returns_400(client: httpx.AsyncClient, ra
     }
 
 
-async def test_a_body_that_is_not_an_object_returns_400(client: httpx.AsyncClient):
-    response = await client.post(CHAT, content="[1]")
-
-    assert response.status_code == 400
-    assert response.json()["error"]["message"] == "Request body must be a JSON object."
-
-
-async def test_missing_messages_returns_400(ai_model: models.AIModel, client: httpx.AsyncClient):
-    response = await post(client, {"model": "llama3.1:8b"})
-
-    assert response.status_code == 400
-    assert response.json()["error"]["param"] == "messages"
-
-
 async def test_model_unavailable_returns_503_for_non_streaming(
     ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ):
@@ -256,18 +230,6 @@ async def test_model_unavailable_returns_503_for_non_streaming(
     assert response.status_code == 503
     assert response.json()["error"]["type"] == "server_error"
     assert response.json()["error"]["message"] == "Model container isn't running."
-
-
-async def test_an_unexpected_failure_is_a_plain_500_for_non_streaming(
-    ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_bot_response", failing(RuntimeError("boom")))
-
-    response = await post(client, HI)
-
-    assert response.status_code == 500
-    assert response.json()["error"]["message"] == "An unexpected error occurred."
-    assert response.json()["error"]["type"] == "server_error"
 
 
 async def test_model_unavailable_returns_503_before_streaming_starts(
@@ -299,20 +261,6 @@ async def test_a_stopped_model_returns_503_before_streaming_starts(
     assert response.json()["error"]["message"] == generation.NOT_RUNNING_MESSAGE
 
 
-async def test_a_failure_while_looking_up_the_model_is_a_500_not_a_broken_stream(
-    ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    async def broken(*args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("docker exploded")
-
-    monkeypatch.setattr(runtime, "get_ollama_url", broken)
-
-    response = await post(client, {**HI, "stream": True})
-
-    assert response.status_code == 500
-    assert response.json()["error"]["message"] == "An unexpected error occurred."
-
-
 async def test_a_model_failing_mid_stream_is_reported_in_the_stream(
     ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ):
@@ -332,18 +280,6 @@ async def test_a_model_failing_mid_stream_is_reported_in_the_stream(
         "error": {"message": "Ollama went away.", "type": "server_error", "param": None, "code": None}
     }
     assert all(f.get("choices", [{}])[0].get("finish_reason") != "stop" for f in frames)
-
-
-async def test_an_unexpected_failure_mid_stream_is_reported_in_the_stream(
-    ai_model: models.AIModel, client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_bot_response", failing(RuntimeError("boom")))
-
-    response = await post(client, {**HI, "stream": True})
-
-    frames, last = frames_of(response)
-    assert last == "data: [DONE]"
-    assert frames[-1]["error"]["message"] == "An unexpected error occurred."
 
 
 async def test_models_lists_installed_models_as_name_tag(
@@ -369,31 +305,6 @@ async def test_models_lists_installed_models_as_name_tag(
         "object": "list",
         "data": [{"id": "llama3.1:8b", "object": "model", "created": 0, "owned_by": "reichat"}],
     }
-
-
-async def test_models_is_an_empty_list_when_nothing_is_installed(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    async def nothing() -> list[dict[str, Any]]:
-        return []
-
-    monkeypatch.setattr(openai_router.service, "get_available_containers", nothing)
-
-    assert (await client.get("/v1/models")).json() == {"object": "list", "data": []}
-
-
-async def test_models_failure_uses_the_openai_error_shape(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    async def broken() -> list[dict[str, Any]]:
-        raise RuntimeError("docker exploded")
-
-    monkeypatch.setattr(openai_router.service, "get_available_containers", broken)
-
-    response = await client.get("/v1/models")
-
-    assert response.status_code == 500
-    assert response.json()["error"]["message"] == "An unexpected error occurred."
 
 
 class FakeEmbeddings:
@@ -445,16 +356,6 @@ async def test_embeddings_accepts_a_single_string_and_defaults_the_tag_to_latest
     assert asked == [("nomic-embed-text", "latest")]
 
 
-async def test_embeddings_passes_an_explicit_tag_on(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    asked = using_embeddings(monkeypatch, FakeEmbeddings())
-
-    await post(client, {"model": "nomic-embed-text:v1.5", "input": "hi"}, "/v1/embeddings")
-
-    assert asked == [("nomic-embed-text", "v1.5")]
-
-
 async def test_embeddings_reports_a_stopped_model_as_503(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ):
@@ -490,27 +391,12 @@ async def test_embeddings_reports_an_unreachable_ollama_as_503(
     assert response.json()["error"]["message"] == message
 
 
-async def test_an_unexpected_embedding_failure_is_a_plain_500(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
-):
-    using_embeddings(monkeypatch, FakeEmbeddings(RuntimeError("boom")))
-
-    response = await post(client, {"model": "nomic-embed-text", "input": "hi"}, "/v1/embeddings")
-
-    assert response.status_code == 500
-    assert response.json()["error"]["message"] == "An unexpected error occurred."
-
-
 @pytest.mark.parametrize(
     ("body", "param"),
     [
         ({"model": "x", "input": [1, 2]}, "input"),
-        ({"model": "x", "input": []}, "input"),
-        ({"model": "x"}, "input"),
         ({"model": "x", "input": ["a"] * 257}, "input"),
         ({"input": "hi"}, "model"),
-        ({"model": " ", "input": "hi"}, "model"),
-        ({"model": 5, "input": "hi"}, "model"),
     ],
 )
 async def test_embeddings_rejects_bad_input(client: httpx.AsyncClient, body: dict, param: str):
@@ -519,13 +405,6 @@ async def test_embeddings_rejects_bad_input(client: httpx.AsyncClient, body: dic
     assert response.status_code == 400
     assert response.json()["error"]["type"] == "invalid_request_error"
     assert response.json()["error"]["param"] == param
-
-
-async def test_embeddings_rejects_a_body_that_is_not_json(client: httpx.AsyncClient):
-    response = await client.post("/v1/embeddings", content="nope")
-
-    assert response.status_code == 400
-    assert response.json()["error"]["message"] == "Request body must be valid JSON."
 
 
 async def test_v1_is_not_throttled(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):

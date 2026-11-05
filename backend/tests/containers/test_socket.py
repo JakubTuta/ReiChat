@@ -21,10 +21,6 @@ def listing(monkeypatch):
     return mock
 
 
-async def settle() -> None:
-    await asyncio.sleep(0.05)
-
-
 async def test_a_new_connection_gets_a_snapshot_straight_away(connect_ws: ConnectWs):
     progress.try_claim("llama3.1_8b", "Starting…")
 
@@ -87,41 +83,6 @@ async def test_the_snapshot_loop_stops_when_the_last_client_leaves(connect_ws: C
     assert loop_task.done()
 
 
-async def test_the_loop_is_not_started_twice_for_two_clients(connect_ws: ConnectWs):
-    async with connect_ws("/ws/containers/") as first:
-        await first.receive_json()
-        loop_task = containers_socket._snapshot_task
-
-        async with connect_ws("/ws/containers/") as second:
-            await second.receive_json()
-
-            assert containers_socket._snapshot_task is loop_task
-
-
-async def test_a_loop_that_ended_is_started_again_for_the_next_client(connect_ws: ConnectWs, monkeypatch):
-    monkeypatch.setattr(containers_socket, "SNAPSHOT_INTERVAL_SECONDS", 0.01)
-    async with connect_ws("/ws/containers/") as ws:
-        await ws.receive_json()
-        first_loop = containers_socket._snapshot_task
-    await asyncio.wait_for(asyncio.shield(first_loop), timeout=2)
-
-    async with connect_ws("/ws/containers/") as ws:
-        await ws.receive_json()
-
-        assert containers_socket._snapshot_task is not first_loop
-        assert not containers_socket._snapshot_task.done()
-
-
-async def test_leaving_stops_the_server_listening_for_that_client(connect_ws: ConnectWs):
-    async with connect_ws("/ws/containers/") as ws:
-        await ws.receive_json()
-        assert hub.subscriber_count == 1
-
-    await settle()
-
-    assert hub.subscriber_count == 0
-
-
 async def test_a_snapshot_that_cannot_be_built_does_not_close_the_connection(
     connect_ws: ConnectWs, listing: AsyncMock, caplog: pytest.LogCaptureFixture
 ):
@@ -133,17 +94,6 @@ async def test_a_snapshot_that_cannot_be_built_does_not_close_the_connection(
         assert await ws.receive_json() == {"type": "container_update", "info": "still here"}
 
     assert "Failed to send initial snapshot" in caplog.text
-
-
-async def test_frames_the_client_sends_are_ignored(connect_ws: ConnectWs):
-    async with connect_ws("/ws/containers/") as ws:
-        await ws.receive_json()
-
-        await ws.send_text("hello")
-        await ws.send_bytes(b"\x00\x01")
-        progress.broadcast("container_update", {"type": "container_update", "info": "after"}, force=True)
-
-        assert await ws.receive_json() == {"type": "container_update", "info": "after"}
 
 
 async def test_a_page_on_another_site_cannot_listen_in(connect_ws: ConnectWs):

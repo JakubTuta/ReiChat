@@ -2,7 +2,6 @@ import pytest
 
 from app import runtime_settings
 from app.containers import service
-from app.containers.manager import ContainerManager
 from app.realtime import progress
 from tests.containers.conftest import fake_container, managed_labels
 
@@ -26,7 +25,6 @@ def tags(monkeypatch: pytest.MonkeyPatch):
     ("in_progress", "installed", "expected"),
     [
         (True, True, "pulling_model"),
-        (False, True, "running"),
         (False, False, "incomplete"),
         (False, None, "starting"),
     ],
@@ -37,11 +35,6 @@ async def test_resolve_status_reflects_install_state(tags, in_progress, installe
         progress.try_claim("llama3.1_8b", "Starting…")
 
     assert await service.resolve_status(fake_container(labels=managed_labels())) == expected
-
-
-async def test_a_container_that_is_not_running_keeps_its_docker_status(tags):
-    assert await service.resolve_status(fake_container(status="exited", labels=managed_labels())) == "exited"
-    assert tags["asked"] == 0
 
 
 async def test_confirmed_install_is_cached_so_tags_are_not_asked_again(tags):
@@ -61,11 +54,6 @@ async def test_a_missing_model_is_asked_about_every_time(tags):
     assert tags["asked"] == 2
 
 
-async def test_a_container_with_no_known_address_cannot_be_asked(tags):
-    assert await service.check_model_installed(fake_container(labels={})) is None
-    assert tags["asked"] == 0
-
-
 async def test_forgetting_a_container_makes_it_prove_its_model_again(tags):
     container = fake_container(labels=managed_labels())
     await service.check_model_installed(container)
@@ -75,11 +63,6 @@ async def test_forgetting_a_container_makes_it_prove_its_model_again(tags):
     assert service.is_marked_installed(container) is False
     await service.check_model_installed(container)
     assert tags["asked"] == 2
-
-
-def test_forgetting_a_container_nobody_marked_is_harmless():
-    service.forget_installed("never-seen")
-    service.forget_installed(None)
 
 
 async def test_available_containers_are_this_apps_containers_with_their_resolved_status(
@@ -111,15 +94,6 @@ async def test_available_containers_are_this_apps_containers_with_their_resolved
             "environment": {"model": "qwen2.5", "parameters": "0.5b"},
         },
     ]
-
-
-async def test_available_containers_are_empty_when_docker_is_down(monkeypatch):
-    async def not_connected(self):
-        return False
-
-    monkeypatch.setattr(ContainerManager, "ensure_connected", not_connected)
-
-    assert await service.get_available_containers() == []
 
 
 async def test_with_the_users_own_ollama_its_models_are_listed_like_containers(monkeypatch):

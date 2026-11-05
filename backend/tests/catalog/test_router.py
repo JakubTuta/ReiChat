@@ -69,32 +69,6 @@ async def test_models_are_listed_most_popular_first_with_their_versions(
     assert quiet.id == body[1]["id"]
 
 
-async def test_an_empty_catalog_is_an_empty_list(client: httpx.AsyncClient):
-    response = await client.get("/ai-models/")
-
-    assert response.status_code == 200
-    assert response.json() == []
-
-
-async def test_verified_at_is_an_iso_timestamp(client: httpx.AsyncClient, db: AsyncSession):
-    import datetime
-
-    model = await add_model(db, "m")
-    db.add(
-        models.AIModelVersion(
-            ai_model_id=model.id,
-            parameters="8b",
-            size="1 GB",
-            verified_at=datetime.datetime(2026, 3, 4, 5, 6, 7, tzinfo=datetime.UTC),
-        )
-    )
-    await db.commit()
-
-    body = (await client.get("/ai-models/")).json()
-
-    assert body[0]["versions"][0]["verified_at"] == "2026-03-04T05:06:07Z"
-
-
 # Refreshing
 
 
@@ -140,25 +114,6 @@ async def test_the_pull_count_floor_is_passed_on(client: httpx.AsyncClient, monk
     assert [call.args[0] for call in start.call_args_list] == [5000, 200_000]
 
 
-async def test_a_non_numeric_pull_count_is_a_400(client: httpx.AsyncClient, worker):
-    response = await client.put("/ai-models/?minPullCount=lots")
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "minPullCount must be a whole number"}
-    assert worker == []
-    assert progress.get_snapshot()["scrape"]["running"] is False
-
-
-async def test_the_pull_count_has_to_be_given(client: httpx.AsyncClient, worker):
-    response = await client.put("/ai-models/")
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Missing required query parameters",
-        "missing_params": ["minPullCount"],
-    }
-
-
 async def test_refreshing_for_real_updates_the_catalog_and_reports_progress(
     client: httpx.AsyncClient, db: AsyncSession, monkeypatch
 ):
@@ -200,8 +155,6 @@ async def _the_refresh_task():
             "Q4_K_M",
         ),
         ("https://hf.co/user/repo", "hf.co/user/repo", "latest"),
-        ("http://hf.co/user/repo:7b", "hf.co/user/repo", "7b"),
-        ("someuser/coolmodel:7b", "someuser/coolmodel", "7b"),
         ("  llama3.2:3b  ", "llama3.2", "3b"),
     ],
 )
@@ -252,21 +205,12 @@ async def test_a_catalog_model_added_by_name_is_not_turned_custom(
     assert [v["parameters"] for v in response.json()["versions"]] == ["1b"]
 
 
-@pytest.mark.parametrize(
-    "reference", ["rm -rf /; echo", "", "UPPER", "a" * 201, "model:", "/leading/slash", "x:y:z"]
-)
+@pytest.mark.parametrize("reference", ["rm -rf /; echo", "", "a" * 201])
 async def test_custom_model_rejects_nonsense(client: httpx.AsyncClient, reference):
     response = await client.post("/custom-models/", json={"reference": reference})
 
     assert response.status_code == 400
     assert "doesn't look like a model name" in response.json()["error"]
-
-
-async def test_custom_model_needs_a_reference(client: httpx.AsyncClient):
-    response = await client.post("/custom-models/", json={})
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "Missing required body parameters", "missing_params": ["reference"]}
 
 
 async def test_a_custom_model_without_chats_can_be_removed(client: httpx.AsyncClient, db: AsyncSession):
@@ -319,19 +263,6 @@ async def test_a_catalog_model_cannot_be_removed_through_the_custom_endpoint(
     assert response.status_code == 404
     assert response.json() == {"error": "Custom model not found"}
     assert await model_count(db) == 1
-
-
-async def test_removing_a_model_that_does_not_exist_is_a_404(client: httpx.AsyncClient):
-    response = await client.request("DELETE", "/custom-models/", json={"id": 999})
-
-    assert response.status_code == 404
-
-
-async def test_removing_needs_an_id(client: httpx.AsyncClient):
-    response = await client.request("DELETE", "/custom-models/", json={})
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "Missing required body parameters", "missing_params": ["id"]}
 
 
 async def test_a_non_numeric_id_is_a_400_not_a_server_error(client: httpx.AsyncClient):

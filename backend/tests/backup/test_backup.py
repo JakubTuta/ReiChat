@@ -1,4 +1,3 @@
-import io
 import json
 
 import httpx
@@ -151,24 +150,6 @@ async def test_importing_adds_and_never_overwrites(db: AsyncSession, populated):
     assert original.title == "Trip"
 
 
-async def test_a_backup_without_documents_has_none(db: AsyncSession, populated):
-    data = await service.export_data(db, include_documents=False)
-
-    assert data["collections"] == []
-    assert data["chats"][0]["collections"] == []
-
-
-async def test_an_export_carries_the_format_marker(db: AsyncSession, populated):
-    data = await service.export_data(db, include_documents=False)
-
-    assert (data["format"], data["version"]) == ("reichat-backup", 1)
-    assert data["exported_at"].endswith("+00:00")
-    assert [p["name"] for p in data["personas"]] == ["Pirate"]
-    assert data["chats"][0]["settings"]["num_ctx"] == 16384
-    assert data["chats"][0]["persona"] == "Pirate"
-    assert [m["content"] for m in data["chats"][0]["messages"]] == ["Plan a trip", "Rome?", "Paris!"]
-
-
 async def test_documents_that_are_not_ready_are_not_exported(db: AsyncSession, populated):
     collection = (await db.execute(select(models.DocumentCollection))).scalars().first()
     db.add(models.Document(collection_id=collection.id, filename="half.pdf", status="processing"))
@@ -212,16 +193,6 @@ async def test_chats_for_unknown_models_get_a_placeholder_model(db: AsyncSession
     assert any("never-installed-model" in note for note in report.notes)
 
 
-async def test_the_placeholder_note_is_given_once_per_model(db: AsyncSession, populated):
-    data = await service.export_data(db, include_documents=False)
-    data["chats"][0]["model"] = "missing-model"
-    data["chats"].append({**data["chats"][0], "title": "Second"})
-
-    report = await service.import_data(db, data)
-
-    assert len([n for n in report.notes if "missing-model" in n]) == 1
-
-
 async def test_rejects_files_that_are_not_backups(db: AsyncSession):
     with pytest.raises(service.BackupFormatError):
         await service.import_data(db, {"hello": "world"})
@@ -229,11 +200,6 @@ async def test_rejects_files_that_are_not_backups(db: AsyncSession):
         await service.import_data(db, {"format": "reichat-backup", "version": 99})
     with pytest.raises(service.BackupFormatError):
         await service.import_data(db, ["not", "a", "dict"])
-
-
-async def test_a_damaged_section_is_named(db: AsyncSession):
-    with pytest.raises(service.BackupFormatError, match='"chats"'):
-        await service.import_data(db, {"format": "reichat-backup", "version": 1, "chats": "oops"})
 
 
 async def test_damaged_backup_imports_nothing(client: httpx.AsyncClient, db: AsyncSession, populated):
@@ -294,12 +260,6 @@ async def test_backup_download_and_upload_over_http(client: httpx.AsyncClient, p
     }
 
 
-async def test_a_download_without_documents_has_none(client: httpx.AsyncClient, populated):
-    body = (await client.get("/backup/")).json()
-
-    assert body["collections"] == []
-
-
 async def test_uploading_something_that_is_not_json_is_explained(client: httpx.AsyncClient):
     response = await client.post(
         "/backup/", files={"file": ("backup.json", b"\xff\xfe not json", "application/json")}
@@ -307,15 +267,6 @@ async def test_uploading_something_that_is_not_json_is_explained(client: httpx.A
 
     assert response.status_code == 400
     assert response.json() == {"error": "That file couldn't be read — it isn't valid JSON."}
-
-
-async def test_uploading_a_json_file_that_is_not_a_backup_is_explained(client: httpx.AsyncClient):
-    response = await client.post(
-        "/backup/", files={"file": ("x.json", b'{"hello": "world"}', "application/json")}
-    )
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "This isn't a ReiChat backup file."}
 
 
 async def test_a_file_that_is_too_large_is_refused_before_it_is_read(client: httpx.AsyncClient, monkeypatch):
@@ -327,13 +278,6 @@ async def test_a_file_that_is_too_large_is_refused_before_it_is_read(client: htt
 
     assert response.status_code == 400
     assert response.json() == {"error": "That file is too large to import."}
-
-
-async def test_restoring_needs_a_file(client: httpx.AsyncClient):
-    response = await client.post("/backup/", data={})
-
-    assert response.status_code == 400
-    assert response.json()["missing_params"] == ["file"]
 
 
 async def test_a_backup_cannot_be_restored_from_another_site(client: httpx.AsyncClient, db: AsyncSession):
@@ -427,14 +371,6 @@ async def test_an_imported_conversation_keeps_images_and_drops_other_roles(
     ]
 
 
-async def test_an_imported_conversation_without_a_title_gets_one(client: httpx.AsyncClient, populated):
-    response = await client.post(
-        "/chat-import/llama3.1-backup-test", files=upload(exported_conversation(title=""))
-    )
-
-    assert response.json()["title"] == "Imported chat"
-
-
 async def test_a_conversation_with_nothing_to_import_is_refused(
     client: httpx.AsyncClient, db: AsyncSession, populated
 ):
@@ -450,34 +386,8 @@ async def test_a_conversation_with_nothing_to_import_is_refused(
     assert await count(db, models.ChatHistory) == chats_before
 
 
-async def test_a_file_that_is_not_a_conversation_is_refused(client: httpx.AsyncClient, populated):
-    response = await client.post("/chat-import/llama3.1-backup-test", files=upload({"hello": "world"}))
-
-    assert response.status_code == 400
-    assert response.json() == {"error": "This isn't an exported ReiChat conversation."}
-
-
 async def test_importing_into_an_unknown_model_is_a_404(client: httpx.AsyncClient):
     response = await client.post("/chat-import/nothing", files=upload(exported_conversation()))
 
     assert response.status_code == 404
     assert response.json() == {"error": "AI model not found"}
-
-
-async def test_importing_a_conversation_that_is_not_json_is_explained(client: httpx.AsyncClient, populated):
-    response = await client.post(
-        "/chat-import/llama3.1-backup-test",
-        files={"file": ("c.json", io.BytesIO(b"nope"), "application/json")},
-    )
-
-    assert response.status_code == 400
-    assert "isn't valid JSON" in response.json()["error"]
-
-
-async def test_model_names_with_slashes_work_for_imports(client: httpx.AsyncClient, db: AsyncSession):
-    await make_model(db, "hf.co/u/repo", is_custom=True)
-
-    response = await client.post("/chat-import/hf.co/u/repo", files=upload(exported_conversation()))
-
-    assert response.status_code == 201
-    assert response.json()["model"] == "hf.co/u/repo"

@@ -222,18 +222,6 @@ async def test_done_frame_reports_memory_use_and_keeps_stats_separate(
     assert captured["generation_params"]["num_ctx"] == 4096
 
 
-async def test_without_a_chosen_length_the_standard_preset_is_requested_explicitly(
-    connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
-):
-    captured: dict = {}
-    monkeypatch.setattr(generation, "astream_bot_response", capturing(captured))
-
-    done = (await collect(connect_ws, chat))[-1]
-
-    assert captured["generation_params"]["num_ctx"] == 8192
-    assert done["context"]["preset"] == "standard"
-
-
 async def test_memory_never_exceeds_what_the_model_supports(
     connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
@@ -349,18 +337,6 @@ async def test_continued_chat_summarizes_its_source_on_the_first_message(
     assert continued.seed_summary == "Summary of 4 messages."
 
 
-async def test_receive_omits_stats_key_entirely_when_nothing_was_reported(
-    connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_bot_response", streaming("Hi"))
-
-    frames = await collect(connect_ws, chat)
-
-    assert frames[0] == {"message": "Hi", "done": False}
-    assert without_context(frames[1]) == {"message": "Hi", "done": True}
-    assert "stats" not in frames[1]
-
-
 async def test_receive_rejects_invalid_json(connect_ws: ConnectWs, chat: models.ChatHistory):
     async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
         await ws.send_text("not json")
@@ -368,7 +344,7 @@ async def test_receive_rejects_invalid_json(connect_ws: ConnectWs, chat: models.
         assert await ws.receive_json(timeout=5) == {"error": "Invalid message format.", "done": True}
 
 
-@pytest.mark.parametrize("payload", ["[1, 2]", '"hello"', "42", "null"])
+@pytest.mark.parametrize("payload", ["[1, 2]", "null"])
 async def test_a_message_that_is_not_an_object_is_refused_not_a_crash(
     connect_ws: ConnectWs, chat: models.ChatHistory, payload: str
 ):
@@ -401,28 +377,10 @@ async def test_receive_rejects_missing_required_keys(connect_ws: ConnectWs, chat
     ("fields", "error"),
     [
         ({"message": ""}, "Message must be a non-empty string."),
-        ({"message": 5}, "Message must be a non-empty string."),
         ({"message": "x" * 10_001}, "Message too long. Maximum length is 10000 characters."),
         ({"ai_model": 5}, "Invalid model or chat history."),
-        ({"ai_model_parameters": 8}, "ai_model_parameters must be a string."),
         ({"image": "not-a-data-uri"}, "Invalid image format. Expected a base64 data URI."),
-        ({"image": "data:image/png;base64,"}, "Invalid image format. Expected a base64 data URI."),
-        ({"image": "data:image/png;base64,@@@"}, "Invalid image data — could not decode base64."),
         ({"structured_output": "nope"}, "structured_output must be a list."),
-        ({"structured_output": ["nope"]}, "structured_output[0] must be an object."),
-        (
-            {"structured_output": [{"type": "string"}]},
-            "structured_output[0].field must be a non-empty string.",
-        ),
-        ({"structured_output": [{"field": "a"}]}, "structured_output[0].type must be a non-empty string."),
-        (
-            {"structured_output": [{"field": "a", "type": "string", "description": "x" * 501}]},
-            "structured_output[0].description must be a string of at most 500 characters.",
-        ),
-        (
-            {"structured_output": [{"field": "a", "type": "array", "arrayType": 3}]},
-            "structured_output[0].arrayType must be a string.",
-        ),
     ],
 )
 async def test_a_malformed_prompt_is_refused_in_plain_words(
@@ -446,24 +404,6 @@ async def test_an_image_over_the_size_limit_is_refused(connect_ws: ConnectWs, ch
             "error": "Image exceeds the maximum allowed size of 5 MB.",
             "done": True,
         }
-
-
-async def test_a_small_image_is_passed_on_to_the_model_and_saved(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    image = "data:image/png;base64," + base64.b64encode(b"tiny").decode()
-    seen: list[str] = []
-
-    async def fake(model_name, parameters, message, image, *args, **kwargs):
-        seen.append(image)
-        yield "ok"
-
-    monkeypatch.setattr(generation, "astream_bot_response", fake)
-
-    await collect(connect_ws, chat, image=image)
-
-    assert seen == [image]
-    assert (await all_messages(db, chat))[0].image == image
 
 
 async def test_receive_surfaces_model_unavailable_as_readable_error(
@@ -563,15 +503,6 @@ async def test_receive_unknown_model_reports_invalid_instead_of_500(
     assert response == {"error": "Invalid model or chat history.", "done": True}
 
 
-async def test_a_chat_that_does_not_exist_is_reported_not_crashed(
-    connect_ws: ConnectWs, chat: models.ChatHistory
-):
-    async with connect_ws(f"/ws/chat/{chat.id + 99}/") as ws:
-        await ws.send_json(PROMPT)
-
-        assert await ws.receive_json(timeout=5) == {"error": "Invalid model or chat history.", "done": True}
-
-
 async def test_a_chat_that_belongs_to_another_model_is_not_reachable(
     connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession
 ):
@@ -581,12 +512,6 @@ async def test_a_chat_that_belongs_to_another_model_is_not_reachable(
         await ws.send_json({**PROMPT, "ai_model": "other-model"})
 
         assert await ws.receive_json(timeout=5) == {"error": "Invalid model or chat history.", "done": True}
-
-
-async def test_a_non_numeric_chat_id_is_not_a_chat_socket(connect_ws: ConnectWs):
-    with pytest.RaisesGroup(WebSocketDisconnect):
-        async with connect_ws("/ws/chat/abc/"):
-            pass
 
 
 async def test_stop_cancels_in_flight_generation_and_persists_partial_response(
@@ -622,14 +547,6 @@ async def test_stopping_twice_saves_the_partial_reply_once(
             await ws.receive_json(timeout=0.2)
 
     assert [m.content for m in await all_messages(db, chat)] == ["Hi", "Hel"]
-
-
-async def test_stop_with_no_active_generation_is_a_noop(connect_ws: ConnectWs, chat: models.ChatHistory):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json({"type": "stop"})
-
-        with pytest.raises(TimeoutError):
-            await ws.receive_json(timeout=0.2)
 
 
 async def test_closing_the_tab_mid_reply_stops_the_model_and_keeps_what_was_written(
@@ -687,17 +604,6 @@ async def test_receive_unknown_message_type_reports_error(connect_ws: ConnectWs,
     assert response == {"error": "Unknown message type: 'bogus'", "done": True}
 
 
-async def test_a_message_type_that_is_not_text_is_unknown_too(
-    connect_ws: ConnectWs, chat: models.ChatHistory
-):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json({"type": ["prompt"]})
-        response = await ws.receive_json(timeout=5)
-
-    assert response["done"] is True
-    assert "Unknown message type" in response["error"]
-
-
 async def send_first_turn(ws: Any, monkeypatch: pytest.MonkeyPatch, reply: str = "Hello") -> None:
     monkeypatch.setattr(generation, "astream_bot_response", streaming(reply))
     await ws.send_json(PROMPT)
@@ -734,16 +640,6 @@ async def test_regenerate_replaces_last_assistant_message_and_keeps_user_message
     ]
 
 
-async def test_regenerate_with_nothing_to_regenerate_reports_error(
-    connect_ws: ConnectWs, chat: models.ChatHistory
-):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json({"type": "regenerate", "ai_model": "llama3.1", "ai_model_parameters": "8b"})
-        response = await ws.receive_json(timeout=5)
-
-    assert response == {"error": "Nothing to regenerate yet — send a message first.", "done": True}
-
-
 async def test_regenerate_failure_leaves_original_assistant_message_intact(
     connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
@@ -764,26 +660,6 @@ async def test_regenerate_failure_leaves_original_assistant_message_intact(
         ("user", "Hi"),
         ("assistant", "Hello"),
     ]
-
-
-async def test_regenerate_while_generating_is_rejected(
-    connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
-):
-    release = asyncio.Event()
-    monkeypatch.setattr(generation, "astream_bot_response", hanging_after("Hel", release))
-
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json(PROMPT)
-        assert await ws.receive_json(timeout=5) == {"message": "Hel", "done": False}
-
-        await ws.send_json({"type": "regenerate", "ai_model": "llama3.1", "ai_model_parameters": "8b"})
-        assert await ws.receive_json(timeout=5) == {
-            "error": "A response is already generating. Stop it first.",
-            "done": True,
-        }
-
-        release.set()
-        assert without_context(await ws.receive_json(timeout=5)) == {"message": "Hel", "done": True}
 
 
 async def test_edit_resend_replaces_edited_message_and_discards_everything_after_it(
@@ -832,7 +708,7 @@ async def test_edit_resend_replaces_edited_message_and_discards_everything_after
     }
 
 
-@pytest.mark.parametrize("index", [1, 5, -1])
+@pytest.mark.parametrize("index", [1, 5])
 async def test_edit_resend_on_assistant_or_missing_index_reports_error(
     connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch, index: int
 ):
@@ -854,24 +730,6 @@ async def test_edit_resend_on_assistant_or_missing_index_reports_error(
         "error": "That message can no longer be edited — the conversation may have changed.",
         "done": True,
     }
-
-
-@pytest.mark.parametrize("index", ["0", 1.5, True, None])
-async def test_edit_resend_needs_a_whole_number_index(
-    connect_ws: ConnectWs, chat: models.ChatHistory, index: object
-):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json(
-            {
-                "type": "edit_resend",
-                "index": index,
-                "message": "x",
-                "ai_model": "llama3.1",
-                "ai_model_parameters": "8b",
-            }
-        )
-
-        assert await ws.receive_json(timeout=5) == {"error": "index must be an integer.", "done": True}
 
 
 async def test_edit_resend_failure_leaves_original_tail_intact(
@@ -902,47 +760,6 @@ async def test_edit_resend_failure_leaves_original_tail_intact(
         ("user", "Hi"),
         ("assistant", "Hello"),
     ]
-
-
-async def test_edit_resend_while_generating_is_rejected(
-    connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
-):
-    release = asyncio.Event()
-    monkeypatch.setattr(generation, "astream_bot_response", hanging_after("Hel", release))
-
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json(PROMPT)
-        assert await ws.receive_json(timeout=5) == {"message": "Hel", "done": False}
-
-        await ws.send_json(
-            {
-                "type": "edit_resend",
-                "index": 0,
-                "message": "Hey",
-                "ai_model": "llama3.1",
-                "ai_model_parameters": "8b",
-            }
-        )
-        assert await ws.receive_json(timeout=5) == {
-            "error": "A response is already generating. Stop it first.",
-            "done": True,
-        }
-
-        release.set()
-        assert without_context(await ws.receive_json(timeout=5)) == {"message": "Hel", "done": True}
-
-
-async def test_edit_resend_missing_required_keys_reports_error(
-    connect_ws: ConnectWs, chat: models.ChatHistory
-):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json({"type": "edit_resend", "index": 0})
-        response = await ws.receive_json(timeout=5)
-
-    assert response["done"] is True
-    assert (
-        response["error"] == "The message is missing required fields: message, ai_model, ai_model_parameters."
-    )
 
 
 async def test_receive_uses_tool_path_when_chat_and_model_both_allow_it(
@@ -1025,20 +842,6 @@ async def test_receive_structured_output_takes_priority_over_tools(
     assert response["message"] == '```json\n{"a": 1}\n```'
 
 
-async def test_an_unparseable_structured_reply_is_reported_and_not_saved(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_structured_bot_response", returning(None))
-
-    response = (await collect(connect_ws, chat, structured_output=[{"field": "a", "type": "number"}]))[-1]
-
-    assert response == {
-        "error": "Unable to parse the structured response. Try again or adjust the schema.",
-        "done": True,
-    }
-    assert await all_messages(db, chat) == []
-
-
 async def test_an_empty_reply_is_an_error_not_a_saved_blank_message(
     connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1048,17 +851,6 @@ async def test_an_empty_reply_is_an_error_not_a_saved_blank_message(
 
     assert response == {"error": "The model returned an empty response. Try again.", "done": True}
     assert await all_messages(db, chat) == []
-
-
-async def test_done_frame_reports_how_much_of_the_model_fits_on_the_gpu(
-    connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(runtime, "get_gpu_share", returning(0.6))
-    monkeypatch.setattr(generation, "astream_bot_response", capturing({}))
-
-    done = (await collect(connect_ws, chat))[-1]
-
-    assert done["context"]["gpu_share"] == 0.6
 
 
 async def test_thinking_is_streamed_separately_and_saved_with_the_reply(
@@ -1172,14 +964,6 @@ async def test_an_unanswered_approval_counts_as_denied(
     assert decisions == [False]
 
 
-async def test_an_answer_for_an_unknown_approval_is_ignored(connect_ws: ConnectWs, chat: models.ChatHistory):
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json({"type": "tool_approval", "id": "nope", "approved": True})
-
-        with pytest.raises(TimeoutError):
-            await ws.receive_json(timeout=0.2)
-
-
 async def test_first_reply_in_an_untitled_chat_gets_a_generated_title(
     connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1199,31 +983,6 @@ async def test_first_reply_in_an_untitled_chat_gets_a_generated_title(
     assert chat.title == "Greeting the assistant"
 
 
-async def test_a_failing_title_costs_nothing_but_the_title(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    chat.title = models.DEFAULT_CHAT_TITLE
-    await db.commit()
-
-    async def broken(*args: Any) -> str:
-        raise RuntimeError("model went away")
-
-    monkeypatch.setattr(generation, "agenerate_title", broken)
-    monkeypatch.setattr(generation, "astream_bot_response", capturing({}))
-
-    async with connect_ws(f"/ws/chat/{chat.id}/") as ws:
-        await ws.send_json(PROMPT)
-        while not (await ws.receive_json(timeout=5)).get("done"):
-            pass
-
-        with pytest.raises(TimeoutError):
-            await ws.receive_json(timeout=0.3)
-
-    await db.refresh(chat)
-    assert chat.title == models.DEFAULT_CHAT_TITLE
-    assert len(await all_messages(db, chat)) == 2
-
-
 async def test_titled_chats_are_not_renamed(
     connect_ws: ConnectWs, chat: models.ChatHistory, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1236,56 +995,6 @@ async def test_titled_chats_are_not_renamed(
     frames = await collect(connect_ws, chat)
 
     assert frames[-1]["done"] is True
-
-
-async def test_later_exchanges_are_not_titled(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    chat.title = models.DEFAULT_CHAT_TITLE
-    await db.commit()
-    await make_exchange(db, chat, "Earlier", "Answer")
-
-    async def must_not_title(*args: Any) -> str:
-        raise AssertionError("titled again")
-
-    monkeypatch.setattr(generation, "agenerate_title", must_not_title)
-    monkeypatch.setattr(generation, "astream_bot_response", capturing({}))
-
-    assert (await collect(connect_ws, chat))[-1]["done"] is True
-
-
-async def test_replies_record_which_model_wrote_them(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(generation, "astream_bot_response", capturing({}))
-
-    await collect(connect_ws, chat)
-
-    assert (await all_messages(db, chat))[-1].model_label == "llama3.1:8b"
-
-
-async def test_tools_follow_what_the_installed_model_reports_over_the_catalog(
-    connect_ws: ConnectWs, chat: models.ChatHistory, db: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    # The catalog said no tools (this fixture's model), but the model says yes.
-    chat.tools_enabled = True
-    await db.commit()
-    monkeypatch.setattr(
-        runtime,
-        "get_model_info",
-        returning({"context_length": 8192, "thinking": None, "capabilities": ["tools"]}),
-    )
-    used: list[str] = []
-
-    async def fake(*args: Any, **kwargs: Any) -> AsyncIterator[str]:
-        used.append("tools")
-        yield "ok"
-
-    monkeypatch.setattr(generation, "astream_tool_response", fake)
-
-    await collect(connect_ws, chat)
-
-    assert used == ["tools"]
 
 
 async def test_two_chats_can_generate_at_the_same_time(

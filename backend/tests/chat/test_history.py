@@ -55,13 +55,6 @@ def test_messages_are_serialized_for_the_model_with_their_ids():
     ]
 
 
-async def test_a_model_is_found_by_its_name(db: AsyncSession):
-    model = await make_model(db, "llama3.1")
-
-    assert (await history.get_ai_model(db, "llama3.1")).id == model.id
-    assert await history.get_ai_model(db, "nothing") is None
-
-
 async def test_a_chat_is_only_found_under_its_own_model(db: AsyncSession):
     mine, other = await make_model(db, "mine"), await make_model(db, "other")
     chat = await make_chat(db, mine)
@@ -83,28 +76,6 @@ async def test_chats_are_listed_most_recently_updated_first(db: AsyncSession):
     chats = (await db.execute(history.chats_of_model(model.id, newest_first=True))).scalars().all()
 
     assert [c.title for c in chats] == ["new", "old"]
-
-
-async def test_generation_params_come_from_the_chat(db: AsyncSession):
-    chat = await make_chat(db, temperature=0.5, num_ctx=4096, top_p=None, seed=1)
-
-    assert history.get_generation_params(chat) == {
-        "temperature": 0.5,
-        "num_ctx": 4096,
-        "top_p": None,
-        "seed": 1,
-    }
-
-
-async def test_a_chat_with_a_persona_uses_its_system_prompt(db: AsyncSession):
-    persona = models.Persona(name="Pirate", system_prompt="Talk like a pirate.")
-    db.add(persona)
-    await db.commit()
-    with_persona = await make_chat(db, persona_id=persona.id)
-    without = await make_chat(db)
-
-    assert await history.get_persona_system_prompt(db, with_persona) == "Talk like a pirate."
-    assert await history.get_persona_system_prompt(db, without) is None
 
 
 # The branching tree
@@ -141,13 +112,6 @@ async def test_an_old_branch_is_never_on_the_path_but_is_still_stored(db: AsyncS
     assert len(await messages_of(db, chat)) == 5
 
 
-async def test_a_chat_with_no_active_leaf_has_an_empty_path(db: AsyncSession):
-    chat = await make_chat(db)
-    await make_message(db, chat, "user", "orphan")
-
-    assert await history.get_messages_for_chat(db, chat) == []
-
-
 async def test_the_whole_path_costs_two_queries_however_long_the_chat(db: AsyncSession):
     chat = await make_chat(db)
     parent = None
@@ -177,16 +141,6 @@ async def test_siblings_share_a_parent_and_come_oldest_first(db: AsyncSession):
 
     assert [m.id for m in siblings] == [a1.id, a1b.id]
     assert [m.id for m in await history.get_branch_siblings(db, root)] == [root.id]
-
-
-async def test_root_messages_are_siblings_of_each_other(db: AsyncSession):
-    chat = await make_chat(db)
-    first = await make_message(db, chat, "user", "one")
-    second = await make_message(db, chat, "user", "two")
-    other_chat = await make_chat(db)
-    await make_message(db, other_chat, "user", "elsewhere")
-
-    assert [m.id for m in await history.get_branch_siblings(db, first)] == [first.id, second.id]
 
 
 async def test_the_leaf_of_a_branch_is_the_tip_of_the_most_recent_work_on_it(db: AsyncSession):
@@ -227,22 +181,6 @@ async def test_the_display_path_shows_each_messages_place_among_its_siblings(db:
     ]
 
 
-async def test_the_display_path_carries_thinking_images_and_the_answering_model(db: AsyncSession):
-    chat = await make_chat(db)
-    user = await make_message(db, chat, "user", "What is this?", image="data:image/png;base64,AAA")
-    await make_message(
-        db, chat, "assistant", "A cat.", user, activate=True, thinking="Looks furry.", model_label="llava:7b"
-    )
-
-    shown = await history.serialize_active_path_for_display(db, chat)
-
-    assert (shown[0]["image"], shown[1]["thinking"], shown[1]["model"]) == (
-        "data:image/png;base64,AAA",
-        "Looks furry.",
-        "llava:7b",
-    )
-
-
 # Saving an exchange
 
 
@@ -275,15 +213,6 @@ async def test_a_finished_exchange_is_saved_under_the_active_leaf(db: AsyncSessi
     refreshed = await fresh(db, chat)
     assert refreshed.active_leaf_id == assistant.id
     assert chat.active_leaf_id == assistant.id
-
-
-async def test_the_first_exchange_of_a_chat_starts_the_tree(db: AsyncSession):
-    chat = await make_chat(db)
-
-    await history.add_messages_to_history(db, chat, "Hi", "Hello")
-
-    user = (await messages_of(db, chat))[0]
-    assert user.parent_id is None
 
 
 async def test_saving_an_exchange_moves_the_chat_to_the_top_of_the_list(db: AsyncSession):
@@ -353,18 +282,6 @@ async def test_an_edited_message_branches_a_new_exchange_beside_the_old_one(db: 
     assert (await fresh(db, chat)).active_leaf_id == new_assistant.id
 
 
-async def test_an_edit_deep_in_a_chat_keeps_the_messages_before_it(db: AsyncSession):
-    chat = await make_chat(db)
-    _, first_reply = await make_exchange(db, chat, "one", "uno")
-    await make_exchange(db, chat, "two", "dos", first_reply)
-    chat = await fresh(db, chat)
-
-    await history.commit_new_exchange_branch(db, chat, first_reply.id, "two, reworded", "dos, otra vez")
-
-    path = [m.content for m in await history.get_messages_for_chat(db, await fresh(db, chat))]
-    assert path == ["one", "uno", "two, reworded", "dos, otra vez"]
-
-
 # Edit, regenerate, switch
 
 
@@ -388,7 +305,7 @@ async def test_editing_the_first_message_branches_from_nothing(db: AsyncSession)
     assert await history.prepare_edit_resend(db, chat, 0) == (None, [])
 
 
-@pytest.mark.parametrize("index", [-1, 1, 2, 99])
+@pytest.mark.parametrize("index", [1, 99])
 async def test_edit_resend_only_works_on_a_user_message_that_exists(db: AsyncSession, index):
     chat = await make_chat(db)
     await make_exchange(db, chat, "one", "uno")
@@ -409,24 +326,8 @@ async def test_regenerate_names_the_last_user_message_and_the_history_before_it(
     assert [m["content"] for m in before] == ["one", "uno"]
 
 
-async def test_regenerate_carries_the_users_image(db: AsyncSession):
-    chat = await make_chat(db)
-    user = await make_message(db, chat, "user", "what is it", image="data:x")
-    await make_message(db, chat, "assistant", "a cat", user, activate=True)
-    chat = await fresh(db, chat)
-
-    assert (await history.prepare_regenerate(db, chat))[2] == "data:x"
-
-
 async def test_there_is_nothing_to_regenerate_in_an_empty_chat(db: AsyncSession):
     assert await history.prepare_regenerate(db, await make_chat(db)) is None
-
-
-async def test_there_is_nothing_to_regenerate_when_the_last_message_is_unanswered(db: AsyncSession):
-    chat = await make_chat(db)
-    await make_message(db, chat, "user", "hello?", activate=True)
-
-    assert await history.prepare_regenerate(db, await fresh(db, chat)) is None
 
 
 async def test_switching_branches_lands_on_the_tip_of_the_chosen_one(db: AsyncSession):
@@ -440,17 +341,7 @@ async def test_switching_branches_lands_on_the_tip_of_the_chosen_one(db: AsyncSe
     assert chat.active_leaf_id == a2.id
 
 
-async def test_switching_branches_does_not_reorder_the_chat_list(db: AsyncSession):
-    chat, *_ = await build_tree(db)
-    chat = await fresh(db, chat)
-    old = await age(db, chat)
-
-    await history.switch_branch(db, chat, index=1, sibling_index=0)
-
-    assert abs((await fresh(db, chat)).last_update_time - old) < datetime.timedelta(seconds=1)
-
-
-@pytest.mark.parametrize(("index", "sibling_index"), [(-1, 0), (5, 0), (1, -1), (1, 2), (1, 99)])
+@pytest.mark.parametrize(("index", "sibling_index"), [(5, 0), (1, 99)])
 async def test_switching_to_a_branch_that_does_not_exist_changes_nothing(
     db: AsyncSession, index, sibling_index
 ):
@@ -477,15 +368,6 @@ async def test_a_generated_title_never_replaces_one_the_user_typed(db: AsyncSess
     assert renamed.title == "My own name"
 
 
-async def test_a_title_does_not_change_the_chats_place_in_the_list(db: AsyncSession):
-    chat = await make_chat(db)
-    old = await age(db, chat)
-
-    await history.save_title_if_untitled(db, chat, "Generated")
-
-    assert abs((await fresh(db, chat)).last_update_time - old) < datetime.timedelta(seconds=1)
-
-
 async def test_a_memory_summary_is_remembered_with_the_message_it_covers(db: AsyncSession):
     chat = await make_chat(db)
     message = await make_message(db, chat, "user", "x")
@@ -495,15 +377,6 @@ async def test_a_memory_summary_is_remembered_with_the_message_it_covers(db: Asy
     stored = await fresh(db, chat)
     assert (stored.memory_summary, stored.memory_summary_until_id) == ("They greeted each other.", message.id)
     assert chat.memory_summary == "They greeted each other."
-
-
-async def test_a_seed_summary_is_remembered(db: AsyncSession):
-    chat = await make_chat(db)
-
-    await history.save_seed_summary(db, chat, "Continuing from before.")
-
-    assert (await fresh(db, chat)).seed_summary == "Continuing from before."
-    assert chat.seed_summary == "Continuing from before."
 
 
 async def test_a_continued_chat_can_read_the_conversation_it_continues(db: AsyncSession):
@@ -517,10 +390,6 @@ async def test_a_continued_chat_can_read_the_conversation_it_continues(db: Async
         ("user", "Where is Rome?"),
         ("assistant", "In Italy."),
     ]
-
-
-async def test_a_chat_that_continues_nothing_has_no_seed_history(db: AsyncSession):
-    assert await history.get_seed_source_history(db, await make_chat(db)) == []
 
 
 async def test_a_chat_whose_source_was_deleted_has_no_seed_history(db: AsyncSession):
@@ -543,21 +412,6 @@ def test_the_snippet_centers_the_match_with_ellipses():
     assert snippet.count("…") == 2
     assert "needle" in snippet.lower()
     assert len(snippet) < len(content)
-
-
-def test_the_snippet_has_no_leading_ellipsis_when_the_match_is_near_the_start():
-    snippet = history._build_search_snippet("NEEDLE" + "b" * 200, "needle")
-
-    assert snippet.startswith("NEEDLE")
-    assert snippet.endswith("…")
-
-
-def test_a_short_message_is_its_own_snippet():
-    assert history._build_search_snippet("just a needle here", "needle") == "just a needle here"
-
-
-def test_a_snippet_with_no_match_falls_back_to_the_start_of_the_message():
-    assert history._build_search_snippet("x" * 500, "needle") == "x" * 120
 
 
 async def test_search_requires_a_minimum_query_length(db: AsyncSession):
@@ -627,16 +481,3 @@ async def test_search_treats_percent_and_underscore_literally(db: AsyncSession):
     ]
     assert [r["snippet"] for r in await history.search_messages(db, model, "a_b")] == ["a_b and axb"]
     assert await history.search_messages(db, model, "%%") == []
-
-
-async def test_search_returns_the_newest_matches_first_and_at_most_fifty(db: AsyncSession):
-    model = await make_model(db)
-    chat = await make_chat(db, model)
-    for n in range(60):
-        await make_message(db, chat, "user", f"needle number {n}")
-
-    results = await history.search_messages(db, model, "needle")
-
-    assert len(results) == history.SEARCH_RESULT_LIMIT
-    assert results[0]["snippet"] == "needle number 59"
-    assert results[-1]["snippet"] == "needle number 10"

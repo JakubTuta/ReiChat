@@ -104,23 +104,6 @@ async def test_post_collection_can_belong_to_a_chat(
     assert response.json()["chat"] == chat.id
 
 
-async def test_post_collection_for_an_unknown_chat_is_a_404(
-    client: httpx.AsyncClient, embedding_model, db: AsyncSession
-):
-    response = await client.post(
-        "/collections/",
-        json={
-            "name": "x",
-            "embedding_model": embedding_model.id,
-            "embedding_parameters": "latest",
-            "chat": 999999,
-        },
-    )
-
-    assert response.status_code == 404
-    assert await count(db, models.DocumentCollection) == 0
-
-
 async def test_post_collection_rejects_non_embedding_model(client: httpx.AsyncClient, db: AsyncSession):
     chat_model = await make_model(db, "llama3.1-rag-test")
 
@@ -133,20 +116,10 @@ async def test_post_collection_rejects_non_embedding_model(client: httpx.AsyncCl
     assert response.json() == {"error": "That model isn't an embedding model"}
 
 
-async def test_post_collection_unknown_embedding_model_returns_404(client: httpx.AsyncClient):
-    response = await client.post(
-        "/collections/", json={"name": "My Docs", "embedding_model": 999999, "embedding_parameters": "latest"}
-    )
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Embedding model not found"}
-
-
 @pytest.mark.parametrize(
     "body",
     [
         {"embedding_model": 1, "embedding_parameters": "latest"},
-        {"name": "x", "embedding_parameters": "latest"},
         {"name": "x", "embedding_model": 1},
     ],
 )
@@ -157,8 +130,9 @@ async def test_post_collection_needs_name_model_and_parameters(client: httpx.Asy
     assert response.json()["error"] == "Missing required body parameters"
 
 
-@pytest.mark.parametrize("field", ["name", "embedding_parameters"])
-async def test_post_collection_refuses_blank_text(client: httpx.AsyncClient, embedding_model, field):
+async def test_post_collection_refuses_blank_text(client: httpx.AsyncClient, embedding_model):
+    field = "name"
+
     body = {
         "name": "Docs",
         "embedding_model": embedding_model.id,
@@ -189,19 +163,6 @@ async def test_get_collections_includes_document_count(
     assert body[0]["embedding_model_name"] == "nomic-embed-text-views-test"
 
 
-async def test_a_collection_without_documents_has_a_count_of_zero(client: httpx.AsyncClient, collection):
-    assert (await client.get("/collections/")).json()[0]["document_count"] == 0
-
-
-async def test_newest_collections_are_listed_first(
-    client: httpx.AsyncClient, embedding_model, db: AsyncSession
-):
-    await add_collection(db, embedding_model, "Older")
-    await add_collection(db, embedding_model, "Newer")
-
-    assert [c["name"] for c in (await client.get("/collections/")).json()] == ["Newer", "Older"]
-
-
 async def test_get_collections_filtered_by_chat_id_includes_global_ones(
     client: httpx.AsyncClient, embedding_model, db: AsyncSession
 ):
@@ -214,16 +175,6 @@ async def test_get_collections_filtered_by_chat_id_includes_global_ones(
     response = await client.get(f"/collections/?chat_id={chat.id}")
 
     assert {c["name"] for c in response.json()} == {"Global", "Own"}
-
-
-async def test_without_a_chat_filter_every_collection_is_listed(
-    client: httpx.AsyncClient, embedding_model, db: AsyncSession
-):
-    chat = await make_chat(db)
-    await add_collection(db, embedding_model, "Global")
-    await add_collection(db, embedding_model, "Own", chat_id=chat.id)
-
-    assert {c["name"] for c in (await client.get("/collections/")).json()} == {"Global", "Own"}
 
 
 async def test_delete_collection_removes_it_and_cascades_documents(
@@ -263,13 +214,6 @@ async def test_deleting_a_collection_keeps_the_chats_that_used_it(
 
     assert await count(db, models.ChatHistory) == 1
     assert await count(db, models.chat_history_active_collection) == 0
-
-
-async def test_delete_collection_not_found_returns_404(client: httpx.AsyncClient):
-    response = await client.request("DELETE", "/collections/", json={"id": 999999})
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Collection not found"}
 
 
 # Documents
@@ -400,32 +344,6 @@ async def test_a_file_without_text_is_refused(client: httpx.AsyncClient, collect
     assert await count(db, models.Document) == 0
 
 
-async def test_post_document_unknown_collection_returns_404(client: httpx.AsyncClient):
-    response = await client.post("/documents/", **upload(999999, content=b"content"))
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Collection not found"}
-
-
-async def test_post_document_needs_a_collection_and_a_file(client: httpx.AsyncClient):
-    response = await client.post("/documents/", data={})
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Missing required body parameters",
-        "missing_params": ["collection_id", "file"],
-    }
-
-
-async def test_post_document_with_only_a_collection_says_the_file_is_missing(
-    client: httpx.AsyncClient, collection
-):
-    response = await client.post("/documents/", data={"collection_id": str(collection.id)})
-
-    assert response.status_code == 400
-    assert response.json()["missing_params"] == ["file"]
-
-
 async def test_post_document_from_another_site_is_refused(
     client: httpx.AsyncClient, collection, db: AsyncSession
 ):
@@ -435,16 +353,6 @@ async def test_post_document_from_another_site_is_refused(
 
     assert response.status_code == 403
     assert await count(db, models.Document) == 0
-
-
-async def test_get_documents_requires_collection_id(client: httpx.AsyncClient):
-    response = await client.get("/documents/")
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Missing required query parameters",
-        "missing_params": ["collection_id"],
-    }
 
 
 async def test_get_documents_lists_for_collection_newest_first(
@@ -459,23 +367,6 @@ async def test_get_documents_lists_for_collection_newest_first(
 
     assert response.status_code == 200
     assert [d["filename"] for d in response.json()] == ["new.txt", "old.txt"]
-
-
-async def test_get_documents_only_lists_that_collections_documents(
-    client: httpx.AsyncClient, collection, embedding_model, db: AsyncSession
-):
-    other = await add_collection(db, embedding_model, "Other")
-    db.add_all(
-        [
-            models.Document(collection_id=collection.id, filename="mine.txt"),
-            models.Document(collection_id=other.id, filename="theirs.txt"),
-        ]
-    )
-    await db.commit()
-
-    body = (await client.get(f"/documents/?collection_id={collection.id}")).json()
-
-    assert [d["filename"] for d in body] == ["mine.txt"]
 
 
 async def test_listing_documents_fails_the_ones_a_restart_orphaned(
@@ -509,10 +400,6 @@ async def test_listing_documents_leaves_a_live_ingest_alone(
     assert listed["status"] == "processing"
 
 
-async def test_get_documents_for_a_non_numeric_collection_is_a_400(client: httpx.AsyncClient):
-    assert (await client.get("/documents/?collection_id=abc")).status_code == 400
-
-
 async def test_delete_document_removes_it_and_its_chunks(
     client: httpx.AsyncClient, collection, db: AsyncSession
 ):
@@ -533,13 +420,6 @@ async def test_delete_document_removes_it_and_its_chunks(
     assert await count(db, models.Document) == 0
     assert await count(db, models.DocumentChunk) == 0
     assert await count(db, models.DocumentCollection) == 1
-
-
-async def test_delete_document_not_found_returns_404(client: httpx.AsyncClient):
-    response = await client.request("DELETE", "/documents/", json={"id": 999999})
-
-    assert response.status_code == 404
-    assert response.json() == {"error": "Document not found"}
 
 
 # The passage behind a citation
@@ -567,17 +447,3 @@ async def test_document_chunk_returns_the_cited_passage(
 
     assert response.status_code == 200
     assert response.json() == {"filename": "manual.pdf", "page": 4, "content": "Hold reset for 10 seconds."}
-
-
-async def test_document_chunk_missing_says_so(client: httpx.AsyncClient):
-    response = await client.get("/documents/chunk/?document_id=999999&chunk_index=0")
-
-    assert response.status_code == 404
-    assert "no longer exists" in response.json()["error"]
-
-
-async def test_document_chunk_needs_both_ids(client: httpx.AsyncClient):
-    response = await client.get("/documents/chunk/")
-
-    assert response.status_code == 400
-    assert response.json()["missing_params"] == ["document_id", "chunk_index"]

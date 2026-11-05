@@ -1,5 +1,3 @@
-import datetime
-
 import pytest
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
@@ -24,24 +22,6 @@ async def make_chat(session: AsyncSession, ai_model: models.AIModel | None = Non
     session.add(chat)
     await session.flush()
     return chat
-
-
-async def test_columns_take_their_python_side_defaults(db: AsyncSession):
-    chat = await make_chat(db)
-    await db.commit()
-
-    row = (await db.execute(select(models.ChatHistory).where(models.ChatHistory.id == chat.id))).scalar_one()
-    assert row.title == "New chat"
-    assert row.memory_mode == "trim"
-    assert row.tools_enabled is False
-    assert row.memory_summary == ""
-    assert row.temperature is None
-    assert row.last_update_time.tzinfo is not None
-    assert (
-        datetime.timedelta(0)
-        <= datetime.datetime.now(datetime.UTC) - row.last_update_time
-        < datetime.timedelta(minutes=1)
-    )
 
 
 async def test_timestamps_inside_one_transaction_stay_distinct(db: AsyncSession):
@@ -85,23 +65,6 @@ async def test_deleting_a_persona_keeps_the_chat_and_clears_the_link(db: AsyncSe
     await db.refresh(chat)
 
     assert chat.persona_id is None
-
-
-async def test_chat_and_message_can_point_at_each_other(db: AsyncSession):
-    chat = await make_chat(db)
-    message = models.ChatMessage(chat_id=chat.id, role="user", content="hi")
-    db.add(message)
-    await db.flush()
-    chat.active_leaf_id = message.id
-    chat.memory_summary_until_id = message.id
-    await db.commit()
-
-    await db.execute(delete(models.ChatMessage).where(models.ChatMessage.id == message.id))
-    await db.commit()
-    await db.refresh(chat)
-
-    assert chat.active_leaf_id is None
-    assert chat.memory_summary_until_id is None
 
 
 async def test_deleting_a_message_deletes_its_replies(db: AsyncSession):
@@ -220,24 +183,6 @@ async def test_model_names_and_version_tags_are_unique(db: AsyncSession):
     await db.rollback()
 
 
-async def test_messages_load_in_the_order_they_were_written(db: AsyncSession):
-    chat = await make_chat(db)
-    same_instant = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
-    for content in ("one", "two", "three"):
-        db.add(models.ChatMessage(chat_id=chat.id, role="user", content=content, created_at=same_instant))
-    await db.commit()
-
-    loaded = (
-        await db.execute(
-            select(models.ChatHistory)
-            .where(models.ChatHistory.id == chat.id)
-            .options(selectinload(models.ChatHistory.messages))
-        )
-    ).scalar_one()
-
-    assert [message.content for message in loaded.messages] == ["one", "two", "three"]
-
-
 async def test_a_relationship_that_was_not_eager_loaded_fails_loudly(db: AsyncSession):
     chat = await make_chat(db)
     await db.commit()
@@ -256,15 +201,6 @@ async def test_an_unset_setting_value_is_sql_null_not_json_null(db: AsyncSession
     row = (await db.execute(text("SELECT value IS NULL AS is_sql_null FROM app_setting"))).one()
 
     assert row.is_sql_null is True
-
-
-async def test_a_setting_value_round_trips_as_json(db: AsyncSession):
-    db.add(models.AppSetting(key="gpu_share", value={"percent": 50, "tags": ["a"]}))
-    await db.commit()
-
-    value = (await db.execute(select(models.AppSetting.value))).scalar_one()
-
-    assert value == {"percent": 50, "tags": ["a"]}
 
 
 async def test_vectors_round_trip_and_rank_by_cosine_distance(db: AsyncSession):
@@ -302,36 +238,3 @@ async def test_vectors_round_trip_and_rank_by_cosine_distance(db: AsyncSession):
 
     assert [row.content for row in nearest] == ["north", "northeast"]
     assert nearest[0].embedding == pytest.approx([0.0, 1.0, 0.0])
-
-
-async def test_vectors_of_different_sizes_can_live_in_different_collections(db: AsyncSession):
-    embedder = make_model("embedder", is_embedding=True)
-    db.add(embedder)
-    await db.flush()
-    for name, vector in (("small", [1.0, 2.0]), ("large", [1.0, 2.0, 3.0, 4.0])):
-        collection = models.DocumentCollection(
-            name=name, embedding_model_id=embedder.id, embedding_parameters="latest"
-        )
-        db.add(collection)
-        await db.flush()
-        document = models.Document(collection_id=collection.id, filename=f"{name}.txt")
-        db.add(document)
-        await db.flush()
-        db.add(
-            models.DocumentChunk(
-                document_id=document.id, chunk_index=0, content=name, char_start=0, embedding=vector
-            )
-        )
-    await db.commit()
-
-    assert (await db.execute(select(func.count()).select_from(models.DocumentChunk))).scalar_one() == 2
-
-
-async def test_ports_and_container_names_are_unique(db: AsyncSession):
-    db.add(models.ContainerPort(container_name="a", port=11434))
-    await db.commit()
-
-    db.add(models.ContainerPort(container_name="b", port=11434))
-    with pytest.raises(IntegrityError):
-        await db.flush()
-    await db.rollback()

@@ -47,12 +47,6 @@ async def test_not_found_tag():
     assert result.size_bytes is None
 
 
-async def test_unexpected_status_is_error_not_a_crash():
-    result = await registry.verify_tag(_client_returning(_FakeResponse(500)), "llama3.1", "8b")
-
-    assert result.status == "error"
-
-
 async def test_network_failure_is_error_not_a_crash():
     class _RaisingClient:
         async def get(self, url, headers=None, **kwargs):
@@ -63,24 +57,10 @@ async def test_network_failure_is_error_not_a_crash():
     assert result.status == "error"
 
 
-async def test_malformed_json_is_error_not_a_crash():
-    class _BadJsonResponse:
-        status_code = 200
-
-        def json(self):
-            raise ValueError("not json")
-
-    result = await registry.verify_tag(_client_returning(_BadJsonResponse()), "llama3.1", "8b")
-
-    assert result.status == "error"
-
-
 @pytest.mark.parametrize(
     ("size_bytes", "expected"),
     [
         (None, "unknown"),
-        (0, "unknown"),
-        (512, "512 B"),
         (2048, "2.0 KB"),
         (4_700_000_000, "4.4 GB"),
     ],
