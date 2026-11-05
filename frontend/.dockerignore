@@ -1,1 +1,7 @@
 node_modules
+.nuxt
+.output
+.git
+test-results
+playwright-report
+tests
