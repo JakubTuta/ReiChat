@@ -10,7 +10,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.backup import router as backup_router
 from app.catalog import router as catalog_router
 from app.chat import router as chat_router
+from app.chat import socket as chat_socket
 from app.compare import router as compare_router
+from app.compare import socket as compare_socket
 from app.containers import router as containers_router
 from app.containers import socket as containers_socket
 from app.core import tasks
@@ -98,5 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(personas_router.router)
     app.include_router(prompt_templates_router.router)
     app.include_router(rag_router.router)
+    app.include_router(chat_socket.router)
+    app.include_router(compare_socket.router)
     app.include_router(containers_socket.router)
     return app
