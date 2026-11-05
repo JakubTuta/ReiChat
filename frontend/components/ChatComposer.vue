@@ -53,6 +53,22 @@ function stop() {
   emit('stop')
 }
 
+// The composer shows "esc to stop" while a reply streams, so make it true.
+// Escape is left alone when a dialog or menu is open (it closes that first)
+// and when focus is in another text field, where it already means "cancel".
+useEventListener(window, 'keydown', (event: KeyboardEvent) => {
+  if (event.key !== 'Escape' || !props.waitingForResponse || event.defaultPrevented)
+    return
+
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+    return
+
+  if (document.querySelector('.v-dialog.v-overlay--active, .v-menu.v-overlay--active'))
+    return
+
+  stop()
+})
+
 function clearImage() {
   image.value = ''
 }
