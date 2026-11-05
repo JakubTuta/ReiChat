@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.16.2",
+    "@nuxt/test-utils": "^4.3.4",
     "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.10",
     "@typescript-eslint/eslint-plugin": "^8.35.1",
