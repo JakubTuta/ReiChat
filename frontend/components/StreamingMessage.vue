@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ToolCall } from '~/constants/websocket'
+import type { ToolCall } from '~/composables/websocket'
 import type { IContainer } from '~/models/container'
 
 const props = defineProps<{

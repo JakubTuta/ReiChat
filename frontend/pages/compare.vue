@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CompareSocketWrapper } from '~/constants/compareSocket'
-import { getCompareSocket } from '~/constants/compareSocket'
+import type { CompareSocketWrapper } from '~/composables/compareSocket'
+import { getCompareSocket } from '~/composables/compareSocket'
 
 interface ResultState {
   content: string

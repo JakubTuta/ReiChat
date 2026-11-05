@@ -1,6 +1,6 @@
-import type { EditResendPayload, RegeneratePayload, ToolApproval, ToolCall, WebsocketHandlers, WebsocketMessage, WebsocketResponse } from '~/constants/websocket'
+import type { EditResendPayload, RegeneratePayload, ToolApproval, ToolCall, WebsocketHandlers, WebsocketMessage, WebsocketResponse } from '~/composables/websocket'
 import type { IChatMessage } from '~/stores/chatStore'
-import { getWebsocket } from '~/constants/websocket'
+import { getWebsocket } from '~/composables/websocket'
 
 // Owns the chat WebSocket as a store singleton instead of component state,
 // so a response keeps streaming (and lands in chat history) while the user

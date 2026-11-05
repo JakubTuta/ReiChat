@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ToolApproval } from '~/constants/websocket'
+import type { ToolApproval } from '~/composables/websocket'
 
 const props = defineProps<{
   request: ToolApproval

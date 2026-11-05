@@ -1,4 +1,4 @@
-import type { Citation, ContextReport, GenerationStats, ToolCall } from '~/constants/websocket'
+import type { Citation, ContextReport, GenerationStats, ToolCall } from '~/composables/websocket'
 import type { IAIModel } from '~/models/aiModel'
 import type { ThinkingControls } from '~/utils/thinking'
 import { mapAIModel } from '~/models/aiModel'

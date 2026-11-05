@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ContextReport } from '~/constants/websocket'
+import type { ContextReport } from '~/composables/websocket'
 import { nextPreset, previousPreset, spillsOutOfGpu } from '~/utils/memory'
 
 const props = defineProps<{

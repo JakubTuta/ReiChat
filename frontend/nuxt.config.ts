@@ -45,7 +45,6 @@ export default defineNuxtConfig({
     autoImport: true,
     dirs: [
       'stores/**',
-      'constants/**',
       'utils/**',
       'components/**',
       'models/**',

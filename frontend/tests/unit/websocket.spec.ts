@@ -1,6 +1,6 @@
-import type { WebsocketHandlers } from '~/constants/websocket'
+import type { WebsocketHandlers } from '~/composables/websocket'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getWebsocket } from '~/constants/websocket'
+import { getWebsocket } from '~/composables/websocket'
 
 let instances: FakeWebSocket[]
 let handlers: { [K in keyof WebsocketHandlers]-?: WebsocketHandlers[K] }

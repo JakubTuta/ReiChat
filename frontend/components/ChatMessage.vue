@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Citation } from '~/constants/websocket'
+import type { Citation } from '~/composables/websocket'
 import type { IContainer } from '~/models/container'
 import type { IChatMessage } from '~/stores/chatStore'
 

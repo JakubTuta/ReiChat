@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { WebsocketMessage } from '~/constants/websocket'
+import type ChatDock from '~/components/ChatDock.vue'
+import type ChatMessageList from '~/components/ChatMessageList.vue'
+import type { WebsocketMessage } from '~/composables/websocket'
 import type { IContainer } from '~/models/container'
-import type { IGenerationParams } from '~/stores/chatStore'
 
 const props = defineProps<{
   selectedChatId: string
@@ -19,13 +20,8 @@ const drawerOpen = defineModel<boolean>('drawerOpen', { default: false })
 const { selectedChatId, reset } = toRefs(props)
 
 const composerMessage = ref('')
-const composerRef = ref<{ focus: () => void, clear: () => void } | null>(null)
-const scrollToMe = ref<HTMLDivElement | null>(null)
-const messagesContainer = ref<HTMLDivElement | null>(null)
-const structuredOutputFormat = ref([])
-const isFormValid = ref(false)
-const jsonEnforced = ref(false)
-const showScrollFab = ref(false)
+const listRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
+const dockRef = ref<InstanceType<typeof ChatDock> | null>(null)
 
 const editingIndex = ref<number | null>(null)
 const editConfirmDialog = ref(false)
@@ -33,20 +29,12 @@ const pendingEditIndex = ref<number | null>(null)
 const pendingEditContent = ref('')
 
 const chatStore = useChatStore()
-const { chatHistoryPerModel, aiModels, allChats, chatContext } = storeToRefs(chatStore)
-
-const hardwareStore = useHardwareStore()
-const { hardware } = storeToRefs(hardwareStore)
+const { chatHistoryPerModel, chatContext } = storeToRefs(chatStore)
 
 const containerStore = useContainerStore()
 
 const chatSocketStore = useChatSocketStore()
 const {
-  botResponse,
-  toolCallTrace,
-  notices,
-  thinkingResponse,
-  pendingApproval,
   websocket,
   waitingForResponse,
   isReconnecting,
@@ -58,6 +46,10 @@ const snackbarStore = useSnackbarStore()
 
 const wsBaseURL = useRuntimeConfig().public.serverUrl
 
+const current = useCurrentChat(selectedModel, selectedChatId)
+const { title: currentChatTitle, continuedFrom } = current
+const { setMemorySize, switchToSummarize, continueInFreshChat } = useChatSettings(selectedModel, selectedChatId, current)
+
 const suggestions = [
   'Explain quantum computing simply',
   'Write a Python quicksort function',
@@ -65,200 +57,7 @@ const suggestions = [
   'Summarize the history of the internet',
 ]
 
-const currentChatTitle = computed(() => {
-  if (!selectedModel.value || !selectedChatId.value)
-    return ''
-
-  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value)?.title ?? ''
-})
-
-const personaDialogOpen = ref(false)
-
-const currentChatPersona = computed(() => {
-  if (!selectedModel.value || !selectedChatId.value)
-    return null
-
-  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value)?.persona ?? null
-})
-
-async function handlePersonaSelect(persona: { id: string, name: string } | null) {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  await chatStore.setChatPersona(selectedModel.value.model, { id: selectedChatId.value }, persona)
-}
-
-const parameterPanelOpen = ref(false)
-
-const currentChatGenerationParams = computed<IGenerationParams>(() => {
-  const found = selectedModel.value && selectedChatId.value
-    ? allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value)
-    : null
-
-  return {
-    temperature: found?.temperature ?? null,
-    num_ctx: found?.num_ctx ?? null,
-    top_p: found?.top_p ?? null,
-    seed: found?.seed ?? null,
-  }
-})
-
-async function handleGenerationParamsSave(params: Partial<IGenerationParams>) {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  await chatStore.setChatGenerationParams(selectedModel.value.model, { id: selectedChatId.value }, params)
-}
-
-const memoryDialogOpen = ref(false)
-
-const currentChatSummary = computed(() => {
-  if (!selectedModel.value || !selectedChatId.value)
-    return null
-
-  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value) ?? null
-})
-
-const LOW_RAM_BYTES = 16 * 1024 ** 3
-
-const lowResources = computed(() => hardware.value.gpu_available === false
-  || (hardware.value.ram_bytes !== null && hardware.value.ram_bytes < LOW_RAM_BYTES))
-
-function refreshChatContext() {
-  if (selectedModel.value && selectedChatId.value)
-    chatStore.fetchChatContext(selectedModel.value.model, selectedChatId.value, selectedModel.value.parameters)
-}
-
-watch([selectedChatId, () => selectedModel.value?.model, () => selectedModel.value?.status], () => {
-  chatContext.value = null
-  refreshChatContext()
-}, { immediate: true })
-
-async function saveMemory(memory: { num_ctx?: number | null, memory_mode?: 'trim' | 'summarize' }) {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  if (await chatStore.setChatMemory(selectedModel.value.model, { id: selectedChatId.value }, memory)) {
-    refreshChatContext()
-    snackbarStore.showSnackbarSuccess('Memory settings saved — they apply from the next message.')
-  }
-}
-
-const mcpServerStore = useMCPServerStore()
-
-async function decideToolApproval({ approved, always }: { approved: boolean, always: boolean }) {
-  const server = pendingApproval.value?.server
-  chatSocketStore.respondToolApproval(approved)
-
-  if (always && server) {
-    if (!mcpServerStore.servers.length)
-      await mcpServerStore.fetchServers()
-    const found = mcpServerStore.servers.find(s => s.name === server)
-    if (found)
-      await mcpServerStore.setServerAutoApprove(found.id, true)
-  }
-}
-
-async function setThinkLevel(thinkLevel: string) {
-  if (selectedModel.value && selectedChatId.value)
-    await chatStore.setChatThinkLevel(selectedModel.value.model, { id: selectedChatId.value }, thinkLevel)
-}
-
-function setMemorySize(tokens: number) {
-  saveMemory({ num_ctx: tokens })
-}
-
-function switchToSummarize() {
-  saveMemory({ memory_mode: 'summarize' })
-}
-
-async function continueInFreshChat() {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  const newChatId = await chatStore.continueChat(selectedModel.value.model, selectedChatId.value)
-  if (newChatId) {
-    emit('selectChat', newChatId)
-    snackbarStore.showSnackbarInfo('New chat started — your first message there will include a summary of the old one.')
-  }
-}
-
-const promptTemplateDialogOpen = ref(false)
-
-const documentsDialogOpen = ref(false)
-const jsonDialogOpen = ref(false)
-const plusMenuOpen = ref(false)
-
-const embeddingModels = computed(() => aiModels.value.filter(m => m.is_embedding))
-
-const currentChatActiveCollections = computed(() => {
-  if (!selectedModel.value || !selectedChatId.value)
-    return []
-
-  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value)?.active_collections ?? []
-})
-
-async function handleActiveCollectionsUpdate(collections: { id: number, name: string }[]) {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  await chatStore.setChatActiveCollections(selectedModel.value.model, { id: selectedChatId.value }, collections)
-}
-
-const currentChatToolsEnabled = computed(() => {
-  if (!selectedModel.value || !selectedChatId.value)
-    return false
-
-  return allChats.value[selectedModel.value.model]?.find(c => c.id === selectedChatId.value)?.tools_enabled ?? false
-})
-
-async function toggleTools() {
-  if (!selectedModel.value || !selectedChatId.value)
-    return
-
-  await chatStore.setChatToolsEnabled(
-    selectedModel.value.model,
-    { id: selectedChatId.value },
-    !currentChatToolsEnabled.value,
-  )
-}
-
-type DialogTarget = 'persona' | 'parameters' | 'files' | 'templates' | 'json' | 'tools'
-
-function openDialog(target: DialogTarget) {
-  if (target === 'persona')
-    personaDialogOpen.value = true
-  else if (target === 'parameters')
-    parameterPanelOpen.value = true
-  else if (target === 'files')
-    documentsDialogOpen.value = true
-  else if (target === 'templates')
-    promptTemplateDialogOpen.value = true
-  else if (target === 'json')
-    jsonDialogOpen.value = true
-  else if (target === 'tools')
-    plusMenuOpen.value = true
-}
-
 const modelRunning = computed(() => selectedModel.value?.status === 'running')
-
-// The installed model's own report beats the ollama.com catalog, which has
-// listed capable models without their "tools" chip.
-function modelHas(capability: string, catalogFlag: boolean | undefined): boolean {
-  const reported = chatContext.value?.capabilities
-  if (reported?.length)
-    return reported.includes(capability)
-
-  return !!catalogFlag
-}
-
-const toolsAvailable = computed(() => modelHas('tools', selectedModel.value?.canUseTools))
-const visionAvailable = computed(() => modelHas('vision', selectedModel.value?.canProcessImages))
-
-const sendGateOk = computed(() => !!selectedChatId.value && !!websocket.value && !isReconnecting.value && !reconnectFailed.value,
-)
-
-const canUseStructuredOutput = computed(() => (isFormValid.value && structuredOutputFormat.value.length > 0))
 
 const chatHistory = computed(() => {
   if (!selectedModel.value || !chatHistoryPerModel.value[selectedModel.value.model])
@@ -267,11 +66,10 @@ const chatHistory = computed(() => {
   return chatHistoryPerModel.value[selectedModel.value.model]
 })
 
-watch(chatHistory, () => {
-  nextTick(() => {
-    scrollToBottom()
-  })
-})
+watch([selectedChatId, () => selectedModel.value?.model, () => selectedModel.value?.status], () => {
+  chatContext.value = null
+  current.refreshContext()
+}, { immediate: true })
 
 watch(selectedModel, (newModel, oldModel) => {
   if (!newModel
@@ -291,24 +89,6 @@ watch(reset, (newValue) => {
     softReset()
   }
 })
-
-watch(botResponse, () => {
-  // Fires once per streamed token — respect showScrollFab (the user has
-  // manually scrolled up) instead of yanking them back to the bottom on
-  // every token, which made it impossible to reread earlier text while a
-  // response was still streaming in.
-  if (showScrollFab.value)
-    return
-
-  nextTick(() => {
-    scrollToBottom()
-  })
-})
-
-function scrollToBottom() {
-  if (scrollToMe.value)
-    scrollToMe.value.scrollIntoView({ behavior: 'smooth' })
-}
 
 // The socket itself lives in chatSocketStore, not here — a plain
 // component-local ref got closed on every ChatCard unmount, which cancelled
@@ -330,6 +110,10 @@ watch(failedPrompt, (text) => {
     composerMessage.value = text
 })
 
+function scrollToBottom() {
+  listRef.value?.scrollToBottom()
+}
+
 function reconnectManually() {
   chatSocketStore.reconnectManually(wsBaseURL)
 }
@@ -338,7 +122,7 @@ function resetComposerUi() {
   editingIndex.value = null
   editConfirmDialog.value = false
   pendingEditIndex.value = null
-  composerRef.value?.clear()
+  dockRef.value?.clear()
   emit('softReset')
 }
 
@@ -349,14 +133,16 @@ function softReset() {
 
 function useSuggestion(text: string) {
   composerMessage.value = text
-  composerRef.value?.focus()
+  dockRef.value?.focus()
 }
 
-function onMessagesScroll() {
-  const el = messagesContainer.value
-  if (!el)
-    return
-  showScrollFab.value = el.scrollHeight - el.scrollTop - el.clientHeight > 120
+// The JSON shape a reply must follow, when the user turned that on.
+function structuredOutputPayload() {
+  const fields = dockRef.value?.structuredOutput
+
+  return fields
+    ? { structured_output: fields }
+    : {}
 }
 
 function handleSend(payload: { message: string, image: string }) {
@@ -367,13 +153,11 @@ function handleSend(payload: { message: string, image: string }) {
     message: payload.message,
     ai_model: selectedModel.value.model,
     ai_model_parameters: selectedModel.value.parameters,
+    ...structuredOutputPayload(),
   }
 
   if (payload.image)
     websocketMessage.image = payload.image
-
-  if (canUseStructuredOutput.value && jsonEnforced.value)
-    websocketMessage.structured_output = structuredOutputFormat.value
 
   if (!chatSocketStore.sendMessage(websocketMessage)) {
     snackbarStore.showSnackbarError('Connection lost — please wait for reconnection or refresh the page.')
@@ -388,7 +172,7 @@ function handleSend(payload: { message: string, image: string }) {
   resetComposerUi()
 
   // The just-sent user message is pushed into chatHistoryPerModel in place
-  // (array.push, same reference) — the `watch(chatHistory, ...)` below
+  // (array.push, same reference) — the message list's watch on its history
   // never fires for that because Vue's default (non-deep) watch compares
   // by reference, so it's a no-op on in-place mutation. Scroll explicitly
   // here rather than relying on it.
@@ -415,9 +199,7 @@ function regenerateResponse() {
   chatSocketStore.regenerate({
     ai_model: selectedModel.value.model,
     ai_model_parameters: selectedModel.value.parameters,
-    ...(canUseStructuredOutput.value && jsonEnforced.value
-      ? { structured_output: structuredOutputFormat.value }
-      : {}),
+    ...structuredOutputPayload(),
   })
 }
 
@@ -482,22 +264,22 @@ function confirmSaveEdit(index: number) {
     message: newContent,
     ai_model: selectedModel.value.model,
     ai_model_parameters: selectedModel.value.parameters,
-    ...(canUseStructuredOutput.value && jsonEnforced.value
-      ? { structured_output: structuredOutputFormat.value }
-      : {}),
+    ...structuredOutputPayload(),
   })
 }
 
-function handleSwitchBranch({ index, siblingIndex }: { index: number, siblingIndex: number }) {
-  switchBranch(index, siblingIndex)
-}
-
-async function switchBranch(index: number, siblingIndex: number) {
+async function handleSwitchBranch({ index, siblingIndex }: { index: number, siblingIndex: number }) {
   if (!selectedModel.value || waitingForResponse.value)
     return
 
   await chatStore.switchBranch(selectedModel.value.model, selectedChatId.value, index, siblingIndex)
-  refreshChatContext()
+  current.refreshContext()
+}
+
+async function continueFresh() {
+  const newChatId = await continueInFreshChat()
+  if (newChatId)
+    emit('selectChat', newChatId)
 }
 
 function exportChat(format: 'md' | 'json') {
@@ -505,7 +287,7 @@ function exportChat(format: 'md' | 'json') {
     return
 
   const model = selectedModel.value.model
-  const title = allChats.value[model]?.find(c => c.id === selectedChatId.value)?.title ?? 'chat'
+  const title = current.chat.value?.title ?? 'chat'
   const messages = chatHistory.value.map(m => ({ role: m.role, content: m.content, image: m.image }))
 
   if (format === 'md')
@@ -513,77 +295,16 @@ function exportChat(format: 'md' | 'json') {
   else
     downloadTextFile(title, 'json', buildJsonExport(title, model, messages), 'application/json')
 }
-
-watch(waitingForResponse, (newValue) => {
-  if (newValue) {
-    nextTick(() => {
-      scrollToBottom()
-    })
-  }
-})
 </script>
 
 <template>
   <div class="chat-card">
-    <div
-      v-if="selectedModel && selectedModel.status !== 'running'"
-      class="status-banner"
-    >
-      <span class="status-banner-label">Model</span>
-
-      <span class="status-banner-text">
-        <template v-if="selectedModel.status === 'pulling_model'">
-          Model is still being pulled — sending will be enabled once it's ready.
-        </template>
-
-        <template v-else-if="selectedModel.status === 'starting'">
-          Model is starting up — this takes a few seconds.
-        </template>
-
-        <template v-else-if="selectedModel.status === 'incomplete'">
-          This model's download didn't finish. Resume it on the Models page to start chatting.
-        </template>
-
-        <template v-else>
-          Container is not running.
-        </template>
-      </span>
-
-      <NuxtLink
-        v-if="selectedModel.status !== 'pulling_model'"
-        to="/models"
-        class="status-banner-action"
-        style="text-decoration: none"
-      >
-        Manage on Models
-      </NuxtLink>
-    </div>
-
-    <div
-      v-if="isReconnecting"
-      class="status-banner"
-    >
-      <span class="status-banner-label">Connection</span>
-
-      <span class="status-banner-text">Connection lost — reconnecting…</span>
-    </div>
-
-    <div
-      v-if="reconnectFailed"
-      class="status-banner"
-    >
-      <span class="status-banner-label">Connection</span>
-
-      <span class="status-banner-text">Couldn't reconnect. Sending is paused until you reconnect.</span>
-
-      <button
-        type="button"
-        class="status-banner-action"
-        @click="reconnectManually"
-      >
-        Reconnect
-      </button>
-    </div>
+    <ChatStatusBanners
+      :model="selectedModel"
+      :reconnecting="isReconnecting"
+      :reconnect-failed="reconnectFailed"
+      @reconnect="reconnectManually"
+    />
 
     <div
       v-if="selectedModel"
@@ -608,163 +329,38 @@ watch(waitingForResponse, (newValue) => {
       >{{ currentChatTitle }}</span>
     </div>
 
-    <div class="messages-area">
-      <div
-        ref="messagesContainer"
-        class="messages-container"
-        @scroll="onMessagesScroll"
-      >
-        <ChatEmptyState
-          v-if="!selectedModel"
-          variant="no-model"
-        />
+    <ChatMessageList
+      ref="listRef"
+      :model="selectedModel"
+      :chat-history="chatHistory"
+      :continued-from="continuedFrom"
+      :editing-index="editingIndex"
+      :model-running="modelRunning"
+      :suggestions="suggestions"
+      @regenerate="regenerateResponse"
+      @start-edit="handleStartEdit"
+      @request-save-edit="handleRequestSaveEdit"
+      @cancel-edit="handleCancelEdit"
+      @switch-branch="handleSwitchBranch"
+      @more-memory="setMemorySize"
+      @less-memory="setMemorySize"
+      @summarize-memory="switchToSummarize"
+      @continue-fresh="continueFresh"
+      @use-suggestion="useSuggestion"
+    />
 
-        <ChatEmptyState
-          v-if="!chatHistory.length && !botResponse && !toolCallTrace.length && !waitingForResponse && selectedModel"
-          variant="no-messages"
-          :suggestions="suggestions"
-          @use-suggestion="useSuggestion"
-        />
-
-        <div
-          v-if="currentChatSummary?.continued_from"
-          class="continued-banner"
-        >
-          <v-icon
-            size="14"
-            icon="$mdiFileDocumentRefreshOutline"
-          />
-
-          <span>
-            Continues "{{ currentChatSummary.continued_from.title }}" — the model starts out knowing a summary
-            of it.
-          </span>
-        </div>
-
-        <TransitionGroup
-          name="msg"
-          tag="div"
-          class="messages-list"
-        >
-          <ChatMessage
-            v-for="(chatMessage, index) in chatHistory"
-            :key="index"
-            :message="chatMessage"
-            :index="index"
-            :is-last="index === chatHistory.length - 1"
-            :editing="editingIndex === index"
-            :actions-enabled="!waitingForResponse && modelRunning"
-            :model="selectedModel"
-            @regenerate="regenerateResponse"
-            @start-edit="handleStartEdit"
-            @request-save-edit="handleRequestSaveEdit"
-            @cancel-edit="handleCancelEdit"
-            @switch-branch="handleSwitchBranch"
-            @more-memory="setMemorySize"
-            @less-memory="setMemorySize"
-            @summarize-memory="switchToSummarize"
-            @continue-fresh="continueInFreshChat"
-          />
-
-          <StreamingMessage
-            v-if="botResponse || toolCallTrace.length || notices.length || thinkingResponse"
-            key="streaming"
-            :content="botResponse"
-            :tool-calls="toolCallTrace"
-            :notices="notices"
-            :thinking="thinkingResponse"
-            :model="selectedModel"
-          />
-
-          <ToolApprovalCard
-            v-if="pendingApproval"
-            key="approval"
-            :request="pendingApproval"
-            @decide="decideToolApproval"
-          />
-
-          <TypingIndicator
-            v-if="waitingForResponse"
-            key="typing"
-          />
-        </TransitionGroup>
-
-        <div ref="scrollToMe" />
-      </div>
-
-      <Transition name="fade">
-        <button
-          v-if="showScrollFab"
-          type="button"
-          class="scroll-fab"
-          title="Scroll to bottom"
-          aria-label="Scroll to bottom"
-          @click="scrollToBottom"
-        >
-          <v-icon
-            size="18"
-            icon="$mdiChevronDown"
-          />
-        </button>
-      </Transition>
-    </div>
-
-    <div class="composer-dock">
-      <div class="composer-dock-inner">
-        <div
-          v-if="selectedChatId"
-          class="chip-row"
-        >
-          <MemoryMeter
-            v-if="chatContext"
-            :context="chatContext"
-            @open="memoryDialogOpen = true"
-          />
-
-          <ChatSettingsChips
-            :persona="currentChatPersona"
-            :params="currentChatGenerationParams"
-            :active-collections-count="currentChatActiveCollections.length"
-            :tools-enabled="currentChatToolsEnabled"
-            :json-enabled="jsonEnforced"
-            :think-level="chatContext?.thinking
-              ? currentChatSummary?.think_level ?? ''
-              : ''"
-            @open="openDialog"
-          />
-
-          <ChatPlusMenu
-            v-model="plusMenuOpen"
-            :persona="currentChatPersona"
-            :params="currentChatGenerationParams"
-            :active-collections-count="currentChatActiveCollections.length"
-            :tools-enabled="currentChatToolsEnabled"
-            :tools-available="toolsAvailable"
-            :thinking-controls="chatContext?.thinking ?? null"
-            :think-level="currentChatSummary?.think_level ?? ''"
-            :json-enabled="jsonEnforced"
-            :json-field-count="structuredOutputFormat.length"
-            :has-history="!!chatHistory.length"
-            @open="openDialog"
-            @toggle-tools="toggleTools"
-            @set-think-level="setThinkLevel"
-            @export="exportChat"
-          />
-        </div>
-
-        <ChatComposer
-          ref="composerRef"
-          v-model:message="composerMessage"
-          :model-running="modelRunning"
-          :waiting-for-response="waitingForResponse"
-          :send-gate-ok="sendGateOk"
-          :show-image-button="visionAvailable"
-          @send="handleSend"
-          @stop="handleStop"
-          @image-attached="scrollToBottom"
-        />
-      </div>
-    </div>
+    <ChatDock
+      ref="dockRef"
+      v-model:message="composerMessage"
+      :model="selectedModel"
+      :chat-id="selectedChatId"
+      :has-history="!!chatHistory.length"
+      @send="handleSend"
+      @stop="handleStop"
+      @image-attached="scrollToBottom"
+      @export="exportChat"
+      @continue-fresh="continueFresh"
+    />
 
     <ConfirmDialog
       v-model="editConfirmDialog"
@@ -774,51 +370,6 @@ watch(waitingForResponse, (newValue) => {
       confirm-color="mint-btn"
       @confirm="pendingEditIndex !== null && confirmSaveEdit(pendingEditIndex)"
       @cancel="cancelSaveEdit"
-    />
-
-    <PersonaDialog
-      v-model="personaDialogOpen"
-      :current-persona-id="currentChatPersona?.id ?? null"
-      @select="handlePersonaSelect"
-    />
-
-    <ParameterPanelDialog
-      v-model="parameterPanelOpen"
-      :current-params="currentChatGenerationParams"
-      @save="handleGenerationParamsSave"
-      @open-memory="memoryDialogOpen = true"
-    />
-
-    <MemoryDialog
-      v-model="memoryDialogOpen"
-      :context="chatContext"
-      :current-num-ctx="currentChatGenerationParams.num_ctx"
-      :memory-mode="currentChatSummary?.memory_mode ?? 'trim'"
-      :low-resources="lowResources"
-      :has-history="!!chatHistory.length"
-      @save="saveMemory"
-      @continue-fresh="continueInFreshChat"
-    />
-
-    <DocumentsDialog
-      v-if="selectedChatId"
-      v-model="documentsDialogOpen"
-      :chat-id="selectedChatId"
-      :active-collections="currentChatActiveCollections"
-      :embedding-models="embeddingModels"
-      @update:active-collections="handleActiveCollectionsUpdate"
-    />
-
-    <PromptTemplateDialog
-      v-model="promptTemplateDialogOpen"
-      @insert="useSuggestion"
-    />
-
-    <StructuredOutputSelector
-      v-model:is-open="jsonDialogOpen"
-      v-model:format="structuredOutputFormat"
-      v-model:is-form-valid="isFormValid"
-      v-model:enforced="jsonEnforced"
     />
   </div>
 </template>
@@ -863,125 +414,5 @@ watch(waitingForResponse, (newValue) => {
   font-size: 13px;
   font-weight: 500;
   color: oklch(0.42 0.016 168);
-}
-
-.messages-area {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-}
-
-.messages-container {
-  height: 100%;
-  overflow-y: auto;
-  padding: 6px 0 190px;
-  display: flex;
-  flex-direction: column;
-}
-
-.messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  max-width: 660px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.scroll-fab {
-  position: absolute;
-  bottom: 196px;
-  right: 16px;
-  z-index: 5;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
-  background: var(--color-mint-btn);
-  color: var(--color-mint-ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: var(--shadow-popover);
-}
-
-.composer-dock {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 0 24px 22px;
-  background: linear-gradient(to top, var(--color-paper) 62%, transparent);
-  pointer-events: none;
-}
-
-.composer-dock-inner {
-  max-width: 708px;
-  margin: 0 auto;
-  pointer-events: auto;
-}
-
-.continued-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  max-width: 760px;
-  margin: 0 auto 14px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--color-line);
-  background: var(--color-card);
-  color: var(--color-ink-2);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.chip-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.msg-enter-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-.msg-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-.msg-enter-to {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .msg-enter-active {
-    transition: opacity 0.15s ease;
-  }
-
-  .msg-enter-from {
-    transform: none;
-  }
-}
-
-@media (max-width: 600px) {
-  .composer-dock {
-    padding: 0 12px 14px;
-  }
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Citation } from '~/constants/websocket'
+import type { Citation } from '~/composables/websocket'
 
 const props = defineProps<{
   citation: Citation | null

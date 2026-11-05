@@ -1,4 +1,4 @@
-import type { ContextReport } from '~/constants/websocket'
+import type { ContextReport } from '~/composables/websocket'
 
 // Mirrors MEMORY_PRESETS in backend/app/chat/context_window.py. Sizes are tokens;
 // everything the user sees is in "pages" (~500 words ≈ 650 tokens).
