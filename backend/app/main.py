@@ -19,6 +19,7 @@ from app.core.security import OriginGuardMiddleware, SecurityHeadersMiddleware
 from app.db.session import engine
 from app.personas import router as personas_router
 from app.prompt_templates import router as prompt_templates_router
+from app.rag import router as rag_router
 from app.realtime.hub import hub
 
 
@@ -90,5 +91,6 @@ def create_app() -> FastAPI:
     app.include_router(containers_router.router)
     app.include_router(personas_router.router)
     app.include_router(prompt_templates_router.router)
+    app.include_router(rag_router.router)
     app.include_router(containers_socket.router)
     return app

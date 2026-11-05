@@ -11,13 +11,13 @@ from app.db import models
 _counter = itertools.count(1)
 
 
-async def make_model(session: AsyncSession, name: str | None = None, **fields) -> models.AIModel:
-    name = name or f"model-{next(_counter)}"
-    values = {"name": name, "model": name, "description": "", "index": 1, **fields}
-    model = models.AIModel(**values)
-    session.add(model)
+async def make_model(session: AsyncSession, model: str | None = None, **fields) -> models.AIModel:
+    model = model or f"model-{next(_counter)}"
+    values = {"name": model, "model": model, "description": "", "index": 1, **fields}
+    row = models.AIModel(**values)
+    session.add(row)
     await session.commit()
-    return model
+    return row
 
 
 async def make_chat(
