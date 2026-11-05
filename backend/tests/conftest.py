@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp
 
 from app import runtime_settings
+from app.containers import hardware, service
+from app.containers.manager import ContainerManager
 from app.core import tasks
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -32,7 +34,11 @@ async def _reset_process_wide_state(monkeypatch: pytest.MonkeyPatch) -> AsyncIte
     # Module-level registries live for the whole test run, so one test's
     # leftovers would otherwise leak into the next.
     progress.reset()
+    service.reset()
+    hardware.reset()
     ollama_api._show_cache.clear()
+    monkeypatch.setattr(ContainerManager, "_client", None)
+    monkeypatch.setattr(ContainerManager, "_gpu_supported", None)
     yield
     await tasks.cancel_all()
     hub.unbind()

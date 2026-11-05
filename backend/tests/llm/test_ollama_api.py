@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 import respx
@@ -126,3 +128,175 @@ def test_thinking_controls_assume_on_off_when_metadata_is_missing():
         "values": [False, True],
         "default": True,
     }
+
+
+@respx.mock
+async def test_version_reports_what_ollama_says():
+    respx.get(f"{BASE}/api/version").respond(200, json={"version": "0.12.3"})
+
+    assert await ollama_api.version(BASE) == "0.12.3"
+
+
+@respx.mock
+async def test_version_tolerates_a_trailing_slash_on_the_address():
+    route = respx.get(f"{BASE}/api/version").respond(200, json={"version": "0.12.3"})
+
+    assert await ollama_api.version(f"{BASE}/") == "0.12.3"
+    assert route.called
+
+
+@respx.mock
+async def test_version_is_unknown_when_ollama_does_not_say():
+    respx.get(f"{BASE}/api/version").respond(200, json={})
+
+    assert await ollama_api.version(BASE) == "unknown"
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "failure", [httpx.ConnectError("refused"), httpx.Response(500), httpx.Response(200, text="<html>")]
+)
+async def test_version_is_none_when_nothing_answers_like_ollama(failure):
+    if isinstance(failure, Exception):
+        respx.get(f"{BASE}/api/version").mock(side_effect=failure)
+    else:
+        respx.get(f"{BASE}/api/version").mock(return_value=failure)
+
+    assert await ollama_api.version(BASE) is None
+
+
+@respx.mock
+async def test_wait_until_ready_returns_as_soon_as_ollama_answers():
+    respx.get(f"{BASE}/api/version").mock(
+        side_effect=[httpx.ConnectError("booting"), httpx.Response(503), httpx.Response(200, json={})]
+    )
+
+    assert await ollama_api.wait_until_ready(BASE, max_wait_seconds=5, poll_interval=0) is True
+
+
+@respx.mock
+async def test_wait_until_ready_gives_up_after_the_deadline():
+    respx.get(f"{BASE}/api/version").mock(side_effect=httpx.ConnectError("never"))
+
+    assert await ollama_api.wait_until_ready(BASE, max_wait_seconds=0.05, poll_interval=0.01) is False
+
+
+@respx.mock
+async def test_is_model_installed_reads_ollama_tags():
+    respx.get(f"{BASE}/api/tags").respond(
+        200, json={"models": [{"name": "llama3.1:8b", "model": "llama3.1:8b"}]}
+    )
+
+    assert await ollama_api.is_model_installed(BASE, "llama3.1", "8b") is True
+    assert await ollama_api.is_model_installed(BASE, "llama3.1", "70b") is False
+
+
+@respx.mock
+async def test_is_model_installed_is_none_when_ollama_unreachable():
+    respx.get(f"{BASE}/api/tags").mock(side_effect=httpx.ConnectError("refused"))
+
+    assert await ollama_api.is_model_installed(BASE, "llama3.1", "8b") is None
+
+
+@respx.mock
+async def test_delete_model_sends_the_model_name_in_the_body():
+    route = respx.delete(f"{BASE}/api/delete").respond(200)
+
+    assert await ollama_api.delete_model(BASE, "llama3.2", "3b") is True
+    assert route.calls.last.request.read() == b'{"model":"llama3.2:3b"}'
+
+
+@respx.mock
+async def test_delete_model_reports_failure():
+    respx.delete(f"{BASE}/api/delete").respond(404)
+
+    assert await ollama_api.delete_model(BASE, "llama3.2", "3b") is False
+
+
+def ndjson(*events: dict) -> bytes:
+    return b"\n".join(json.dumps(event).encode() for event in events) + b"\n"
+
+
+@respx.mock
+async def test_pull_model_reports_failure_on_stream_error():
+    respx.post(f"{BASE}/api/pull").respond(
+        200,
+        content=ndjson({"status": "pulling manifest"}, {"error": "pull model manifest: file does not exist"}),
+    )
+
+    success, error = await ollama_api.pull_model(BASE, "bogus-model", "8b")
+
+    assert success is False
+    assert error == "pull model manifest: file does not exist"
+
+
+@respx.mock
+async def test_pull_model_reports_success_and_final_progress():
+    respx.post(f"{BASE}/api/pull").respond(
+        200,
+        content=ndjson(
+            {"status": "pulling layer", "digest": "sha256:abc", "total": 100, "completed": 50},
+            {"status": "pulling layer", "digest": "sha256:abc", "total": 100, "completed": 100},
+            {"status": "success"},
+        ),
+    )
+    calls: list[tuple[int, str]] = []
+
+    success, error = await ollama_api.pull_model(
+        BASE, "llama3.1", "8b", progress_cb=lambda pct, detail: calls.append((pct, detail))
+    )
+
+    assert success is True
+    assert error is None
+    assert calls[0] == (50, "Layer abc — 50%")
+    assert calls[-1] == (100, "Model ready")
+
+
+@respx.mock
+async def test_pull_model_asks_for_a_streamed_pull_of_the_right_tag():
+    route = respx.post(f"{BASE}/api/pull").respond(200, content=ndjson({"status": "success"}))
+
+    await ollama_api.pull_model(BASE, "llama3.1", "8b")
+
+    assert json.loads(route.calls.last.request.read()) == {"model": "llama3.1:8b", "stream": True}
+
+
+@respx.mock
+async def test_pull_model_reports_status_text_before_any_layer_is_known():
+    respx.post(f"{BASE}/api/pull").respond(
+        200, content=ndjson({"status": "pulling manifest"}, {"status": "success"})
+    )
+    calls: list[tuple[int, str]] = []
+
+    await ollama_api.pull_model(
+        BASE, "llama3.1", "8b", progress_cb=lambda pct, detail: calls.append((pct, detail))
+    )
+
+    assert calls[0] == (0, "pulling manifest")
+
+
+@respx.mock
+async def test_pull_model_skips_blank_and_garbled_lines():
+    respx.post(f"{BASE}/api/pull").respond(200, content=b'\nnot json\n{"status": "success"}\n')
+
+    assert await ollama_api.pull_model(BASE, "llama3.1", "8b") == (True, None)
+
+
+@respx.mock
+async def test_pull_model_reports_an_error_status():
+    respx.post(f"{BASE}/api/pull").respond(500)
+
+    success, error = await ollama_api.pull_model(BASE, "llama3.1", "8b")
+
+    assert success is False
+    assert "500" in (error or "")
+
+
+@respx.mock
+async def test_pull_model_reports_an_unreachable_server():
+    respx.post(f"{BASE}/api/pull").mock(side_effect=httpx.ConnectError("refused"))
+
+    success, error = await ollama_api.pull_model(BASE, "llama3.1", "8b")
+
+    assert success is False
+    assert "refused" in (error or "")
