@@ -70,6 +70,14 @@ docker-compose up -d
 Open **http://localhost:3000** in your browser. Everything runs on `127.0.0.1` only — nothing here
 is reachable from another device on your network.
 
+### Upgrading from an earlier version
+
+This version keeps its data in a new Docker volume, `reichat-db`, so the chats, documents and
+settings you saved before don't show up in it. Nothing is deleted: that data stays in the old
+`postgres-data` volume (`docker volume ls` shows it, usually as `chatbot_postgres-data`) until you
+remove it yourself. Models you already installed keep working — they live in Docker, not in the
+database.
+
 ---
 
 ## First run: install a model and chat
