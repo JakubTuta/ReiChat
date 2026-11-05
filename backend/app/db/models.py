@@ -178,6 +178,9 @@ class ChatHistory(Base):
 
     ai_model: Mapped[AIModel] = relationship(lazy="raise")
     persona: Mapped[Persona | None] = relationship(lazy="raise")
+    seed_source: Mapped["ChatHistory | None"] = relationship(
+        remote_side="ChatHistory.id", foreign_keys=[seed_source_id], lazy="raise"
+    )
     messages: Mapped[list["ChatMessage"]] = relationship(
         back_populates="chat",
         foreign_keys="ChatMessage.chat_id",

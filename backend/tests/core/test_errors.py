@@ -51,6 +51,14 @@ async def test_invalid_value_gets_a_plain_message_and_details(client: httpx.Asyn
     assert "integer" in body["details"][0]["message"]
 
 
+async def test_a_check_that_spans_several_fields_reads_as_plain_words(client: httpx.AsyncClient):
+    response = await client.post("/probe/pair", json={"low": 5, "high": 1})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Some values in the request are not valid. low can't be above high"
+    assert response.json()["details"] == [{"field": "body", "message": "low can't be above high"}]
+
+
 async def test_non_numeric_path_id_is_a_400_not_a_500(client: httpx.AsyncClient):
     response = await client.get("/probe/items/abc")
 

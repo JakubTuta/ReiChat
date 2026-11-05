@@ -2,7 +2,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, WebSocket
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from starlette.responses import Response, StreamingResponse
 
 from app.core.security import require_json_body
@@ -16,6 +16,22 @@ probe_ws_router = APIRouter(prefix="/probe")
 class EchoBody(BaseModel):
     name: str
     count: int
+
+
+class PairBody(BaseModel):
+    low: int
+    high: int
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "PairBody":
+        if self.low > self.high:
+            raise ValueError("low can't be above high")
+        return self
+
+
+@probe_router.post("/pair")
+async def probe_pair(body: PairBody) -> PairBody:
+    return body
 
 
 @probe_router.get("/ok")

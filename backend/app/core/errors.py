@@ -58,9 +58,15 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         )
 
     details: list[dict[str, Any]] = [
-        {"field": _field_name(error["loc"]), "message": error["msg"]} for error in errors
+        # A check written by us (a model validator) says "Value error, " in front of our own words.
+        {"field": _field_name(error["loc"]), "message": str(error["msg"]).removeprefix("Value error, ")}
+        for error in errors
     ]
-    shown = "; ".join(f"{d['field']}: {d['message']}" for d in details[:_MAX_MESSAGES_SHOWN])
+    # An error about the body as a whole has no field to point at.
+    shown = "; ".join(
+        d["message"] if d["field"] == "body" else f"{d['field']}: {d['message']}"
+        for d in details[:_MAX_MESSAGES_SHOWN]
+    )
     return JSONResponse(
         {"error": f"Some values in the request are not valid. {shown}", "details": details},
         status_code=400,
