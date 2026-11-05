@@ -1,0 +1,58 @@
+import {
+  mdiAlertOutline,
+  mdiArrowUp,
+  mdiBrain,
+  mdiChatOutline,
+  mdiChevronDown,
+  mdiChip,
+  mdiClose,
+  mdiContentCopy,
+  mdiDelete,
+  mdiDownload,
+  mdiFileDocumentRefreshOutline,
+  mdiImagePlus,
+  mdiLightbulbOnOutline,
+  mdiMagnify,
+  mdiMenu,
+  mdiPencil,
+  mdiPlus,
+  mdiRobotConfusedOutline,
+  mdiRobotOutline,
+  mdiServer,
+  mdiShieldAlertOutline,
+  mdiSpeedometerSlow,
+  mdiStop,
+  mdiUpload,
+} from '@mdi/js'
+
+// Every icon the UI draws, registered as a Vuetify alias and used in
+// templates as `icon="$mdiClose"` — the alias is the @mdi/js export name, so
+// the glyph is easy to look up. Registering them here (instead of loading the
+// whole icon font) ships only these paths, and tests/unit/icons.spec.ts fails
+// when a template uses an icon that isn't listed.
+export const appIcons = {
+  mdiAlertOutline,
+  mdiArrowUp,
+  mdiBrain,
+  mdiChatOutline,
+  mdiChevronDown,
+  mdiChip,
+  mdiClose,
+  mdiContentCopy,
+  mdiDelete,
+  mdiDownload,
+  mdiFileDocumentRefreshOutline,
+  mdiImagePlus,
+  mdiLightbulbOnOutline,
+  mdiMagnify,
+  mdiMenu,
+  mdiPencil,
+  mdiPlus,
+  mdiRobotConfusedOutline,
+  mdiRobotOutline,
+  mdiServer,
+  mdiShieldAlertOutline,
+  mdiSpeedometerSlow,
+  mdiStop,
+  mdiUpload,
+}

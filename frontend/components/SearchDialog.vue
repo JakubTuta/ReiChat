@@ -70,9 +70,10 @@ function selectResult(result: ISearchResult) {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -82,7 +83,7 @@ function selectResult(result: ISearchResult) {
           autofocus
           density="compact"
           placeholder="Search message content…"
-          prepend-inner-icon="mdi-magnify"
+          prepend-inner-icon="$mdiMagnify"
           clearable
           hide-details
         />

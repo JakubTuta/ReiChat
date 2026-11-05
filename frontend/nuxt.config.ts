@@ -30,7 +30,6 @@ export default defineNuxtConfig({
 
   modules: [
     '@vueuse/nuxt',
-    '@unocss/nuxt',
     '@pinia/nuxt',
     '@radya/nuxt-dompurify',
     (_options, nuxt) => {

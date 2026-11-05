@@ -661,7 +661,7 @@ const catalogueButtonLabel = computed(() => {
         <v-btn
           variant="text"
           rounded="lg"
-          prepend-icon="mdi-server"
+          prepend-icon="$mdiServer"
           title="Change where models run"
           @click="connectionDialogOpen = true"
         >
@@ -712,9 +712,10 @@ const catalogueButtonLabel = computed(() => {
       v-if="isExternal"
       class="cpu-hint"
     >
-      <v-icon size="16">
-        mdi-server
-      </v-icon>
+      <v-icon
+        size="16"
+        icon="$mdiServer"
+      />
 
       <span>
         Using your own Ollama at <strong>{{ connection.url }}</strong>. Models you install here are downloaded
@@ -726,9 +727,10 @@ const catalogueButtonLabel = computed(() => {
       v-if="hardware.gpu_available === false && !isExternal"
       class="cpu-hint"
     >
-      <v-icon size="16">
-        mdi-chip
-      </v-icon>
+      <v-icon
+        size="16"
+        icon="$mdiChip"
+      />
 
       <span>
         No compatible graphics card (NVIDIA GPU) was found, so models run on your processor (CPU).
@@ -738,9 +740,10 @@ const catalogueButtonLabel = computed(() => {
 
     <div class="filter-row">
       <div class="search-field">
-        <v-icon size="16">
-          mdi-magnify
-        </v-icon>
+        <v-icon
+          size="16"
+          icon="$mdiMagnify"
+        />
 
         <input
           v-model="search"
@@ -1013,9 +1016,10 @@ const catalogueButtonLabel = computed(() => {
                       title="Copy"
                       @click="copyToClipboard(cmd)"
                     >
-                      <v-icon size="14">
-                        mdi-content-copy
-                      </v-icon>
+                      <v-icon
+                        size="14"
+                        icon="$mdiContentCopy"
+                      />
                     </button>
                   </div>
                 </v-expansion-panel-text>

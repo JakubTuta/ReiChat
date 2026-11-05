@@ -132,9 +132,10 @@ function importJSON() {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -172,9 +173,10 @@ function importJSON() {
                 aria-label="Remove field"
                 @click="removeType(index)"
               >
-                <v-icon size="16">
-                  mdi-delete
-                </v-icon>
+                <v-icon
+                  size="16"
+                  icon="$mdiDelete"
+                />
               </button>
             </div>
 
@@ -233,7 +235,7 @@ function importJSON() {
       <v-card-actions class="reichat-dialog-actions">
         <v-btn
           variant="text"
-          prepend-icon="mdi-upload"
+          prepend-icon="$mdiUpload"
           @click="importJSON()"
         >
           Import
@@ -241,7 +243,7 @@ function importJSON() {
 
         <v-btn
           variant="text"
-          prepend-icon="mdi-download"
+          prepend-icon="$mdiDownload"
           @click="downloadJSON()"
         >
           Export

@@ -338,9 +338,10 @@ function handleSearchSelect(chatId: string) {
           aria-label="Search chats"
           @click="searchDialogOpen = true"
         >
-          <v-icon size="15">
-            mdi-magnify
-          </v-icon>
+          <v-icon
+            size="15"
+            icon="$mdiMagnify"
+          />
         </button>
 
         <button
@@ -349,9 +350,10 @@ function handleSearchSelect(chatId: string) {
           title="New chat"
           @click="createNewChat(selectedModel!.model)"
         >
-          <v-icon size="15">
-            mdi-plus
-          </v-icon>
+          <v-icon
+            size="15"
+            icon="$mdiPlus"
+          />
         </button>
       </div>
     </div>
@@ -392,9 +394,10 @@ function handleSearchSelect(chatId: string) {
               aria-label="Rename chat"
               @click.stop="changeChatTitle(chat)"
             >
-              <v-icon size="13">
-                mdi-pencil
-              </v-icon>
+              <v-icon
+                size="13"
+                icon="$mdiPencil"
+              />
             </button>
 
             <button
@@ -404,9 +407,10 @@ function handleSearchSelect(chatId: string) {
               aria-label="Delete chat"
               @click.stop="deleteChat(chat)"
             >
-              <v-icon size="13">
-                mdi-close
-              </v-icon>
+              <v-icon
+                size="13"
+                icon="$mdiClose"
+              />
             </button>
           </template>
 
@@ -419,9 +423,10 @@ function handleSearchSelect(chatId: string) {
             :disabled="loadingChangeChatTitle"
             @click.stop="cancelChangeChatTitle()"
           >
-            <v-icon size="13">
-              mdi-close
-            </v-icon>
+            <v-icon
+              size="13"
+              icon="$mdiClose"
+            />
           </button>
         </div>
       </div>

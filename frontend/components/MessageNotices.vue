@@ -18,9 +18,8 @@ defineProps<{
       <v-icon
         size="14"
         class="message-notice-icon"
-      >
-        mdi-alert-outline
-      </v-icon>
+        icon="$mdiAlertOutline"
+      />
 
       <span>{{ notice }}</span>
     </div>

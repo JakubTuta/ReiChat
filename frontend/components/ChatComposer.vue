@@ -123,7 +123,7 @@ defineExpose({ focus, clear })
         >
 
         <v-btn
-          icon="mdi-close"
+          icon="$mdiClose"
           color="error"
           size="x-small"
           class="image-remove-btn"
@@ -162,9 +162,10 @@ defineExpose({ focus, clear })
         :disabled="inputsDisabled"
         @click="fileInput?.click()"
       >
-        <v-icon size="18">
-          mdi-image-plus
-        </v-icon>
+        <v-icon
+          size="18"
+          icon="$mdiImagePlus"
+        />
 
         <input
           ref="fileInput"
@@ -199,9 +200,10 @@ defineExpose({ focus, clear })
         aria-label="Stop generating"
         @click="stop"
       >
-        <v-icon size="16">
-          mdi-stop
-        </v-icon>
+        <v-icon
+          size="16"
+          icon="$mdiStop"
+        />
       </button>
 
       <button
@@ -214,9 +216,10 @@ defineExpose({ focus, clear })
         :disabled="!canSend"
         @click="send"
       >
-        <v-icon size="18">
-          mdi-arrow-up
-        </v-icon>
+        <v-icon
+          size="18"
+          icon="$mdiArrowUp"
+        />
       </button>
     </div>
   </div>

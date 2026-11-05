@@ -110,9 +110,10 @@ function continueFresh() {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -210,9 +211,10 @@ function continueFresh() {
           class="memory-fresh"
           @click="continueFresh"
         >
-          <v-icon size="16">
-            mdi-file-document-refresh-outline
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiFileDocumentRefreshOutline"
+          />
 
           <span>
             <strong>Start a fresh chat with a summary</strong>

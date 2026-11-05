@@ -377,7 +377,7 @@ function labelFor(key: string): string {
           variant="outlined"
           color="amber"
           rounded="lg"
-          prepend-icon="mdi-stop"
+          prepend-icon="$mdiStop"
           @click="stopCompare"
         >
           Stop

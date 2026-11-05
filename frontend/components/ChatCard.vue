@@ -596,9 +596,10 @@ watch(waitingForResponse, (newValue) => {
         aria-label="Toggle conversations list"
         @click="drawerOpen = !drawerOpen"
       >
-        <v-icon size="18">
-          mdi-menu
-        </v-icon>
+        <v-icon
+          size="18"
+          icon="$mdiMenu"
+        />
       </button>
 
       <span
@@ -629,9 +630,10 @@ watch(waitingForResponse, (newValue) => {
           v-if="currentChatSummary?.continued_from"
           class="continued-banner"
         >
-          <v-icon size="14">
-            mdi-file-document-refresh-outline
-          </v-icon>
+          <v-icon
+            size="14"
+            icon="$mdiFileDocumentRefreshOutline"
+          />
 
           <span>
             Continues "{{ currentChatSummary.continued_from.title }}" — the model starts out knowing a summary
@@ -699,9 +701,10 @@ watch(waitingForResponse, (newValue) => {
           aria-label="Scroll to bottom"
           @click="scrollToBottom"
         >
-          <v-icon size="18">
-            mdi-chevron-down
-          </v-icon>
+          <v-icon
+            size="18"
+            icon="$mdiChevronDown"
+          />
         </button>
       </Transition>
     </div>

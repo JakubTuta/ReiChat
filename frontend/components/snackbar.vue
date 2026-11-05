@@ -36,9 +36,10 @@ const DOT_COLOR: Record<string, string> = {
           aria-label="Dismiss notification"
           @click="snackbarStore.dismiss(toast.id)"
         >
-          <v-icon size="14">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="14"
+            icon="$mdiClose"
+          />
         </button>
       </div>
     </TransitionGroup>

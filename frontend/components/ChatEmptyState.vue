@@ -15,8 +15,8 @@ const emit = defineEmits<{
       <v-icon
         size="18"
         :icon="variant === 'no-model'
-          ? 'mdi-robot-outline'
-          : 'mdi-chat-outline'"
+          ? '$mdiRobotOutline'
+          : '$mdiChatOutline'"
         style="color: var(--color-mint-ink)"
       />
     </div>
