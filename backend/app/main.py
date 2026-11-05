@@ -7,6 +7,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.catalog import router as catalog_router
 from app.containers import router as containers_router
 from app.containers import socket as containers_socket
 from app.core import tasks
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
     app.add_api_route("/health/", health_check, methods=["GET"])
+    app.include_router(catalog_router.router)
     app.include_router(containers_router.router)
     app.include_router(containers_socket.router)
     return app

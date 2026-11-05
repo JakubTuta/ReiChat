@@ -10,13 +10,10 @@ don't need a second code path for listing them.
 
 import typing
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog import registry
+from app.catalog import library, registry
 from app.containers.manager import ContainerManager
-from app.db.models import AIModel, AIModelVersion
 from app.llm import ollama_api
 from app.realtime import progress
 
@@ -64,37 +61,20 @@ async def register_models(session: AsyncSession, base_url: str) -> int:
     for name, size in (await ollama_api.installed_model_sizes(base_url) or {}).items():
         model, _, parameters = name.partition(":")
 
-        model_id = (
-            await session.execute(
-                insert(AIModel)
-                .values(
-                    model=model,
-                    name=model.rsplit("/", 1)[-1],
-                    description="Found on your Ollama.",
-                    is_custom=True,
-                )
-                .on_conflict_do_nothing(index_elements=[AIModel.model])
-                .returning(AIModel.id)
-            )
-        ).scalar_one_or_none()
-        model_created = model_id is not None
-        if model_id is None:
-            model_id = (await session.execute(select(AIModel.id).where(AIModel.model == model))).scalar_one()
-
-        version_created = (
-            await session.execute(
-                insert(AIModelVersion)
-                .values(
-                    ai_model_id=model_id,
-                    parameters=parameters or "latest",
-                    size=registry.format_size(size),
-                    size_bytes=size,
-                )
-                .on_conflict_do_nothing(constraint="unique_ai_model_version")
-                .returning(AIModelVersion.id)
-            )
-        ).scalar_one_or_none() is not None
-
+        model_id, model_created = await library.get_or_create_model(
+            session,
+            model=model,
+            name=model.rsplit("/", 1)[-1],
+            description="Found on your Ollama.",
+            is_custom=True,
+        )
+        version_created = await library.get_or_create_version(
+            session,
+            ai_model_id=model_id,
+            parameters=parameters or "latest",
+            size=registry.format_size(size),
+            size_bytes=size,
+        )
         added += int(model_created or version_created)
 
     await session.commit()
