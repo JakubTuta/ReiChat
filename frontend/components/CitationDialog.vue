@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Citation } from '~/constants/websocket'
+import type { Citation } from '~/composables/websocket'
 
 const props = defineProps<{
   citation: Citation | null
@@ -50,9 +50,10 @@ watch(isOpen, async (open) => {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 

@@ -55,7 +55,23 @@ FastAPI (async, uvicorn) → Ollama containers spawned via the mounted Docker so
   remove a model) always go through `ConfirmDialog.vue` — never a bare click-to-delete button.
 - A backend dependency pin that "already works" in a stale local venv can still fail a clean
   `uv sync --locked` in the Docker image — always verify new/changed pins against a fresh
-  `docker compose build`, not just the local environment.
+  `docker compose build`, not just the local environment. The frontend image installs with
+  `npm ci`, so it fails the same way when `package-lock.json` is out of sync: change dependencies
+  with `npm install`/`npm uninstall` (never edit `package.json` by hand), commit the lockfile, and
+  re-run `docker compose build frontend`.
+- Frontend colours are written down once, as `--color-*` oklch tokens in `assets/css/main.css`. The
+  Vuetify theme is derived from them (`theme/reichat.ts`) — don't paste hex values into it. Icons
+  are the `@mdi/js` paths registered in `theme/icons.ts` and used as `icon="$mdiClose"`; a template
+  using an unregistered icon renders blank (`tests/unit/icons.spec.ts` guards this).
+- Model output is untrusted. The one place it becomes HTML is `MessageParts.vue`, through the
+  `reply` DOMPurify profile (`dompurify.profiles` in `nuxt.config.ts`), and the production
+  Content-Security-Policy there stops the page loading remote images or contacting other hosts
+  (an image URL is how an injected reply leaks a chat). Never add `v-html`, and don't loosen
+  either without extending `tests/browser/security.spec.ts`, which proves both in a real browser.
+- Tests of the Vue app: `tests/unit` is pure logic (no Nuxt), `tests/nuxt` mounts components inside
+  the real Nuxt app, `tests/browser` drives the production build in Chromium against a mocked
+  backend (screenshots + security). A UI change that moves pixels shows up as a failing
+  screenshot — review the diff, then re-baseline deliberately with `npm run test:browser:update`.
 - Comments carry WHY only, never WHAT. No decorative section dividers (`/* ── Label ── */`,
   `// ─── Label ───`, `<!-- ── Label ── -->`) above a self-evidently-named class/function/block. No
   comment that just repeats info already stated elsewhere (e.g. `# GET /foo/` on a route whose
@@ -79,10 +95,12 @@ uv lock                             # after changing pyproject.toml
 
 # Frontend (frontend/)
 npm run dev                         # dev server
-npm run test                        # vitest
+npm run test                        # vitest: unit + Nuxt component tests
 npm run typecheck                   # vue-tsc
 npx eslint .                        # lint
-npx playwright test                 # e2e (needs the stack running)
+npm run test:browser                # screenshots + security in Chromium; builds the app, no Docker needed
+npm run test:browser:update         # re-baseline screenshots after an intended UI change
+npx playwright test                 # e2e smoke (needs the stack running)
 
 # Full stack
 docker-compose up -d

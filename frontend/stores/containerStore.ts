@@ -1,5 +1,5 @@
-import type { ContainerSocketMessage, ContainerSocketWrapper, PullProgressInfo, ScrapeProgressInfo } from '~/constants/containerSocket'
-import { getContainerSocket } from '~/constants/containerSocket'
+import type { ContainerSocketMessage, ContainerSocketWrapper, PullProgressInfo, ScrapeProgressInfo } from '~/composables/containerSocket'
+import { getContainerSocket } from '~/composables/containerSocket'
 
 export type ContainerStatus = 'running' | 'exited' | 'paused' | 'restarting' | 'pulling_model' | 'starting' | 'incomplete'
 

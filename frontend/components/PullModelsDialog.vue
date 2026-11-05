@@ -72,9 +72,10 @@ watch(
           aria-label="Close"
           @click="isShow = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 

@@ -1,6 +1,31 @@
 /* eslint-disable node/prefer-global/process */
 import vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 
+const serverUrl = new URL(process.env.SERVER_URL || 'http://localhost:8000/')
+const serverSocketOrigin = `${serverUrl.protocol === 'https:'
+  ? 'wss'
+  : 'ws'}://${serverUrl.host}`
+
+// What the page may load or talk to. Model output is untrusted and is shown as
+// HTML, so beyond sanitising it the page itself must be unable to send data
+// anywhere: `img-src` is the one that matters most, because an image URL is
+// how a prompt-injected reply leaks a chat without a single click. Inline
+// script and style stay allowed because Nuxt's bootstrap script and Vuetify's
+// style bindings are inline.
+const CONTENT_SECURITY_POLICY = [
+  'default-src \'self\'',
+  'script-src \'self\' \'unsafe-inline\'',
+  'style-src \'self\' \'unsafe-inline\'',
+  'img-src \'self\' data:',
+  'font-src \'self\' data:',
+  `connect-src 'self' ${serverUrl.origin} ${serverSocketOrigin}`,
+  'object-src \'none\'',
+  'frame-src \'none\'',
+  'frame-ancestors \'none\'',
+  'base-uri \'self\'',
+  'form-action \'self\'',
+].join('; ')
+
 export default defineNuxtConfig({
   app: {
     head: {
@@ -30,7 +55,6 @@ export default defineNuxtConfig({
 
   modules: [
     '@vueuse/nuxt',
-    '@unocss/nuxt',
     '@pinia/nuxt',
     '@radya/nuxt-dompurify',
     (_options, nuxt) => {
@@ -46,7 +70,6 @@ export default defineNuxtConfig({
     autoImport: true,
     dirs: [
       'stores/**',
-      'constants/**',
       'utils/**',
       'components/**',
       'models/**',
@@ -74,6 +97,30 @@ export default defineNuxtConfig({
 
   nitro: {
     preset: 'node-server',
+  },
+
+  // Production only: the dev server's hot reload and Nuxt DevTools need
+  // sockets and frames this policy forbids.
+  $production: {
+    nitro: {
+      routeRules: {
+        '/**': { headers: { 'Content-Security-Policy': CONTENT_SECURITY_POLICY } },
+      },
+    },
+  },
+
+  dompurify: {
+    profiles: {
+      // Used by MessageParts as `v-sanitize-html:reply`. DOMPurify's defaults
+      // already drop scripts, event handlers and javascript: links, but still
+      // let a reply inject <style> (restyle or hide the whole app), `style`
+      // attributes (a fake full-screen overlay) and form controls (a
+      // credentials form). A reply is prose, so none of that is needed.
+      reply: {
+        FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'option', 'optgroup', 'fieldset', 'dialog'],
+        FORBID_ATTR: ['style', 'autofocus', 'formaction', 'form', 'name'],
+      },
+    },
   },
 
   typescript: {

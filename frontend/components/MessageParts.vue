@@ -22,7 +22,7 @@ const { copiedKey, copy } = useCopyFeedback()
   >
     <div
       v-if="part.title === 'text'"
-      v-sanitize-html="renderMarkdown(part.content)"
+      v-sanitize-html:reply="renderMarkdown(part.content)"
       class="markdown-body"
     />
 

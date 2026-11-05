@@ -23,7 +23,7 @@ function goHome() {
       <v-container class="error-page">
         <v-icon
           size="72"
-          icon="mdi-robot-confused-outline"
+          icon="$mdiRobotConfusedOutline"
           class="text-medium-emphasis mb-4"
         />
 

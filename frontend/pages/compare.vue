@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CompareSocketWrapper } from '~/constants/compareSocket'
-import { getCompareSocket } from '~/constants/compareSocket'
+import type { CompareSocketWrapper } from '~/composables/compareSocket'
+import { getCompareSocket } from '~/composables/compareSocket'
 
 interface ResultState {
   content: string
@@ -377,7 +377,7 @@ function labelFor(key: string): string {
           variant="outlined"
           color="amber"
           rounded="lg"
-          prepend-icon="mdi-stop"
+          prepend-icon="$mdiStop"
           @click="stopCompare"
         >
           Stop

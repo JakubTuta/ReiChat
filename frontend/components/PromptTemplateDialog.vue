@@ -147,9 +147,10 @@ function confirmFill() {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -175,9 +176,10 @@ function confirmFill() {
                 aria-label="Edit template"
                 @click.stop="openEdit(template)"
               >
-                <v-icon size="14">
-                  mdi-pencil
-                </v-icon>
+                <v-icon
+                  size="14"
+                  icon="$mdiPencil"
+                />
               </button>
 
               <button
@@ -187,9 +189,10 @@ function confirmFill() {
                 aria-label="Delete template"
                 @click.stop="requestDelete(template)"
               >
-                <v-icon size="14">
-                  mdi-delete
-                </v-icon>
+                <v-icon
+                  size="14"
+                  icon="$mdiDelete"
+                />
               </button>
             </div>
 

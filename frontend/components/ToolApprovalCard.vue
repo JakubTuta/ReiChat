@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ToolApproval } from '~/constants/websocket'
+import type { ToolApproval } from '~/composables/websocket'
 
 const props = defineProps<{
   request: ToolApproval
@@ -23,9 +23,10 @@ function decide(approved: boolean, always: boolean) {
     aria-label="Allow a tool to run?"
   >
     <div class="tool-approval-title">
-      <v-icon size="16">
-        mdi-shield-alert-outline
-      </v-icon>
+      <v-icon
+        size="16"
+        icon="$mdiShieldAlertOutline"
+      />
 
       <span>
         The model wants to use <strong>{{ request.name }}</strong>

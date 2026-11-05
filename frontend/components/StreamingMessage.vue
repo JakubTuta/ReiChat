@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ToolCall } from '~/constants/websocket'
+import type { ToolCall } from '~/composables/websocket'
 import type { IContainer } from '~/models/container'
 
 const props = defineProps<{
@@ -53,9 +53,10 @@ watch(() => props.thinking, () => {
       class="thinking-live"
     >
       <div class="thinking-live-header">
-        <v-icon size="14">
-          mdi-lightbulb-on-outline
-        </v-icon>
+        <v-icon
+          size="14"
+          icon="$mdiLightbulbOnOutline"
+        />
 
         <span>Thinking it through before answering…</span>
       </div>

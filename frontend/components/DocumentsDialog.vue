@@ -256,9 +256,10 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -347,9 +348,10 @@ const STATUS_META: Record<string, { dot: string, text: string }> = {
                 aria-label="Remove document"
                 @click="requestDeleteDocument(collection.id, document)"
               >
-                <v-icon size="14">
-                  mdi-close
-                </v-icon>
+                <v-icon
+                  size="14"
+                  icon="$mdiClose"
+                />
               </button>
             </div>
 

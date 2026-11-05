@@ -68,9 +68,10 @@ function pickExport(format: 'md' | 'json') {
         aria-label="Add to this chat"
         v-bind="menuProps"
       >
-        <v-icon size="16">
-          mdi-plus
-        </v-icon>
+        <v-icon
+          size="16"
+          icon="$mdiPlus"
+        />
       </button>
     </template>
 

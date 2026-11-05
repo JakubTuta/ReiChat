@@ -1,4 +1,4 @@
-import type { GenerationStats } from '~/constants/websocket'
+import type { GenerationStats } from '~/composables/websocket'
 
 export function formatStats(stats?: GenerationStats): string {
   if (!stats)

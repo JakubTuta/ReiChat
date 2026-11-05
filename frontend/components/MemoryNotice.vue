@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ContextReport } from '~/constants/websocket'
+import type { ContextReport } from '~/composables/websocket'
 import { nextPreset, previousPreset, spillsOutOfGpu } from '~/utils/memory'
 
 const props = defineProps<{
@@ -32,9 +32,8 @@ const gpuPercent = computed(() => Math.round((props.context.gpu_share ?? 0) * 10
       <v-icon
         size="14"
         class="memory-notice-icon"
-      >
-        mdi-brain
-      </v-icon>
+        icon="$mdiBrain"
+      />
 
       <span>
         This chat is longer than the model can keep in mind, so it didn't see the first
@@ -84,9 +83,8 @@ const gpuPercent = computed(() => Math.round((props.context.gpu_share ?? 0) * 10
       <v-icon
         size="14"
         class="memory-notice-icon"
-      >
-        mdi-speedometer-slow
-      </v-icon>
+        icon="$mdiSpeedometerSlow"
+      />
 
       <span>
         Only {{ gpuPercent }}% of the model fits in your graphics card's memory at this memory size, so

@@ -53,6 +53,22 @@ function stop() {
   emit('stop')
 }
 
+// The composer shows "esc to stop" while a reply streams, so make it true.
+// Escape is left alone when a dialog or menu is open (it closes that first)
+// and when focus is in another text field, where it already means "cancel".
+useEventListener(window, 'keydown', (event: KeyboardEvent) => {
+  if (event.key !== 'Escape' || !props.waitingForResponse || event.defaultPrevented)
+    return
+
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+    return
+
+  if (document.querySelector('.v-dialog.v-overlay--active, .v-menu.v-overlay--active'))
+    return
+
+  stop()
+})
+
 function clearImage() {
   image.value = ''
 }
@@ -123,7 +139,7 @@ defineExpose({ focus, clear })
         >
 
         <v-btn
-          icon="mdi-close"
+          icon="$mdiClose"
           color="error"
           size="x-small"
           class="image-remove-btn"
@@ -162,9 +178,10 @@ defineExpose({ focus, clear })
         :disabled="inputsDisabled"
         @click="fileInput?.click()"
       >
-        <v-icon size="18">
-          mdi-image-plus
-        </v-icon>
+        <v-icon
+          size="18"
+          icon="$mdiImagePlus"
+        />
 
         <input
           ref="fileInput"
@@ -199,9 +216,10 @@ defineExpose({ focus, clear })
         aria-label="Stop generating"
         @click="stop"
       >
-        <v-icon size="16">
-          mdi-stop
-        </v-icon>
+        <v-icon
+          size="16"
+          icon="$mdiStop"
+        />
       </button>
 
       <button
@@ -214,9 +232,10 @@ defineExpose({ focus, clear })
         :disabled="!canSend"
         @click="send"
       >
-        <v-icon size="18">
-          mdi-arrow-up
-        </v-icon>
+        <v-icon
+          size="18"
+          icon="$mdiArrowUp"
+        />
       </button>
     </div>
   </div>

@@ -126,9 +126,10 @@ function selectPersona(persona: IPersona | null) {
           aria-label="Close"
           @click="isOpen = false"
         >
-          <v-icon size="16">
-            mdi-close
-          </v-icon>
+          <v-icon
+            size="16"
+            icon="$mdiClose"
+          />
         </button>
       </div>
 
@@ -163,9 +164,10 @@ function selectPersona(persona: IPersona | null) {
                 aria-label="Edit persona"
                 @click.stop="openEdit(persona)"
               >
-                <v-icon size="14">
-                  mdi-pencil
-                </v-icon>
+                <v-icon
+                  size="14"
+                  icon="$mdiPencil"
+                />
               </button>
 
               <button
@@ -175,9 +177,10 @@ function selectPersona(persona: IPersona | null) {
                 aria-label="Delete persona"
                 @click.stop="requestDelete(persona)"
               >
-                <v-icon size="14">
-                  mdi-delete
-                </v-icon>
+                <v-icon
+                  size="14"
+                  icon="$mdiDelete"
+                />
               </button>
             </div>
           </div>
