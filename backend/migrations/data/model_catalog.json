@@ -1,0 +1,1012 @@
+[
+  {
+    "name": "llama3.1",
+    "model": "llama3.1",
+    "description": "Llama 3.1 is a new state-of-the-art model from Meta available in 8B, 70B and 405B parameter sizes.",
+    "popularity": 118300000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "8b",
+        "size": "4.6 GB",
+        "size_bytes": 4920753328
+      },
+      {
+        "parameters": "70b",
+        "size": "39.6 GB",
+        "size_bytes": 42520412561
+      },
+      {
+        "parameters": "405b",
+        "size": "226.4 GB",
+        "size_bytes": 243069625106
+      }
+    ]
+  },
+  {
+    "name": "deepseek-r1",
+    "model": "deepseek-r1",
+    "description": "DeepSeek-R1 is a family of open reasoning models with performance approaching that of leading models, such as O3 and Gemini 2.5 Pro.",
+    "popularity": 91100000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "1.5b",
+        "size": "1.0 GB",
+        "size_bytes": 1117322768
+      },
+      {
+        "parameters": "7b",
+        "size": "4.4 GB",
+        "size_bytes": 4683075440
+      },
+      {
+        "parameters": "8b",
+        "size": "4.9 GB",
+        "size_bytes": 5225376047
+      },
+      {
+        "parameters": "14b",
+        "size": "8.4 GB",
+        "size_bytes": 8988112209
+      },
+      {
+        "parameters": "32b",
+        "size": "18.5 GB",
+        "size_bytes": 19851337809
+      },
+      {
+        "parameters": "70b",
+        "size": "39.6 GB",
+        "size_bytes": 42520397873
+      },
+      {
+        "parameters": "671b",
+        "size": "376.7 GB",
+        "size_bytes": 404430190268
+      }
+    ]
+  },
+  {
+    "name": "nomic-embed-text",
+    "model": "nomic-embed-text",
+    "description": "A high-performing open embedding model with a large token context window.",
+    "popularity": 81700000,
+    "can_process_image": false,
+    "is_embedding": true,
+    "versions": [
+      {
+        "parameters": "latest",
+        "size": "261.6 MB",
+        "size_bytes": 274302450
+      }
+    ]
+  },
+  {
+    "name": "llama3.2",
+    "model": "llama3.2",
+    "description": "Meta's Llama 3.2 goes small with 1B and 3B models.",
+    "popularity": 79500000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "1b",
+        "size": "1.2 GB",
+        "size_bytes": 1321098329
+      },
+      {
+        "parameters": "3b",
+        "size": "1.9 GB",
+        "size_bytes": 2019393189
+      }
+    ]
+  },
+  {
+    "name": "gemma3",
+    "model": "gemma3",
+    "description": "The current, most capable model that runs on a single GPU.",
+    "popularity": 39400000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "270m",
+        "size": "278.0 MB",
+        "size_bytes": 291554930
+      },
+      {
+        "parameters": "1b",
+        "size": "777.5 MB",
+        "size_bytes": 815319791
+      },
+      {
+        "parameters": "4b",
+        "size": "3.1 GB",
+        "size_bytes": 3338801804
+      },
+      {
+        "parameters": "12b",
+        "size": "7.6 GB",
+        "size_bytes": 8149190253
+      },
+      {
+        "parameters": "27b",
+        "size": "16.2 GB",
+        "size_bytes": 17396936941
+      }
+    ]
+  },
+  {
+    "name": "qwen2.5",
+    "model": "qwen2.5",
+    "description": "Qwen2.5 models are pretrained on Alibaba's latest large-scale dataset, encompassing up to 18 trillion tokens. The model supports up to 128K tokens and has multilingual support.",
+    "popularity": 36500000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.5b",
+        "size": "379.4 MB",
+        "size_bytes": 397821319
+      },
+      {
+        "parameters": "1.5b",
+        "size": "940.4 MB",
+        "size_bytes": 986061892
+      },
+      {
+        "parameters": "3b",
+        "size": "1.8 GB",
+        "size_bytes": 1929912432
+      },
+      {
+        "parameters": "7b",
+        "size": "4.4 GB",
+        "size_bytes": 4683087332
+      },
+      {
+        "parameters": "14b",
+        "size": "8.4 GB",
+        "size_bytes": 8988124069
+      },
+      {
+        "parameters": "32b",
+        "size": "18.5 GB",
+        "size_bytes": 19851349669
+      },
+      {
+        "parameters": "72b",
+        "size": "44.2 GB",
+        "size_bytes": 47415724625
+      }
+    ]
+  },
+  {
+    "name": "qwen3",
+    "model": "qwen3",
+    "description": "Qwen3 is the latest generation of large language models in Qwen series, offering a comprehensive suite of dense and mixture-of-experts (MoE) models.",
+    "popularity": 33700000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.6b",
+        "size": "498.4 MB",
+        "size_bytes": 522653767
+      },
+      {
+        "parameters": "1.7b",
+        "size": "1.3 GB",
+        "size_bytes": 1359293444
+      },
+      {
+        "parameters": "4b",
+        "size": "2.3 GB",
+        "size_bytes": 2497293931
+      },
+      {
+        "parameters": "8b",
+        "size": "4.9 GB",
+        "size_bytes": 5225388164
+      },
+      {
+        "parameters": "14b",
+        "size": "8.6 GB",
+        "size_bytes": 9276198565
+      },
+      {
+        "parameters": "30b",
+        "size": "17.3 GB",
+        "size_bytes": 18556699314
+      },
+      {
+        "parameters": "32b",
+        "size": "18.8 GB",
+        "size_bytes": 20201253829
+      },
+      {
+        "parameters": "235b",
+        "size": "132.4 GB",
+        "size_bytes": 142154087123
+      }
+    ]
+  },
+  {
+    "name": "mistral",
+    "model": "mistral",
+    "description": "The 7B model released by Mistral AI, updated to version 0.3.",
+    "popularity": 31800000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "7b",
+        "size": "4.1 GB",
+        "size_bytes": 4372824384
+      }
+    ]
+  },
+  {
+    "name": "gemma2",
+    "model": "gemma2",
+    "description": "Google Gemma 2 is a high-performing and efficient model available in three sizes: 2B, 9B, and 27B.",
+    "popularity": 29700000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "2b",
+        "size": "1.5 GB",
+        "size_bytes": 1629518495
+      },
+      {
+        "parameters": "9b",
+        "size": "5.1 GB",
+        "size_bytes": 5443152417
+      },
+      {
+        "parameters": "27b",
+        "size": "14.6 GB",
+        "size_bytes": 15628387458
+      }
+    ]
+  },
+  {
+    "name": "llama3",
+    "model": "llama3",
+    "description": "Meta Llama 3: The most capable openly available LLM to date",
+    "popularity": 25000000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "8b",
+        "size": "4.3 GB",
+        "size_bytes": 4661224676
+      },
+      {
+        "parameters": "70b",
+        "size": "37.2 GB",
+        "size_bytes": 39969745349
+      }
+    ]
+  },
+  {
+    "name": "gemma4",
+    "model": "gemma4",
+    "description": "Gemma 4 models are designed to deliver frontier-level performance at each size. They are well-suited for reasoning, agentic workflows, coding, and multimodal understanding.",
+    "popularity": 21300000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "e2b",
+        "size": "6.7 GB",
+        "size_bytes": 7162405886
+      },
+      {
+        "parameters": "e4b",
+        "size": "8.9 GB",
+        "size_bytes": 9608350718
+      },
+      {
+        "parameters": "12b",
+        "size": "7.0 GB",
+        "size_bytes": 7556508396
+      },
+      {
+        "parameters": "26b",
+        "size": "16.8 GB",
+        "size_bytes": 17987581215
+      },
+      {
+        "parameters": "31b",
+        "size": "18.5 GB",
+        "size_bytes": 19868981791
+      }
+    ]
+  },
+  {
+    "name": "qwen2.5-coder",
+    "model": "qwen2.5-coder",
+    "description": "The latest series of Code-Specific Qwen models, with significant improvements in code generation, code reasoning, and code fixing.",
+    "popularity": 20200000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.5b",
+        "size": "379.4 MB",
+        "size_bytes": 397821516
+      },
+      {
+        "parameters": "1.5b",
+        "size": "940.4 MB",
+        "size_bytes": 986062089
+      },
+      {
+        "parameters": "3b",
+        "size": "1.8 GB",
+        "size_bytes": 1929912626
+      },
+      {
+        "parameters": "7b",
+        "size": "4.4 GB",
+        "size_bytes": 4683087561
+      },
+      {
+        "parameters": "14b",
+        "size": "8.4 GB",
+        "size_bytes": 8988124298
+      },
+      {
+        "parameters": "32b",
+        "size": "18.5 GB",
+        "size_bytes": 19851349898
+      }
+    ]
+  },
+  {
+    "name": "phi3",
+    "model": "phi3",
+    "description": "Phi-3 is a family of lightweight 3B (Mini) and 14B (Medium) state-of-the-art open models by Microsoft.",
+    "popularity": 18000000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "3.8b",
+        "size": "2.0 GB",
+        "size_bytes": 2176178913
+      },
+      {
+        "parameters": "14b",
+        "size": "7.4 GB",
+        "size_bytes": 7897127458
+      }
+    ]
+  },
+  {
+    "name": "qwen3.5",
+    "model": "qwen3.5",
+    "description": "Qwen 3.5 is a family of open-source multimodal models that delivers exceptional utility and performance.",
+    "popularity": 17200000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.8b",
+        "size": "988.1 MB",
+        "size_bytes": 1036046583
+      },
+      {
+        "parameters": "2b",
+        "size": "2.6 GB",
+        "size_bytes": 2741192820
+      },
+      {
+        "parameters": "4b",
+        "size": "3.2 GB",
+        "size_bytes": 3389983735
+      },
+      {
+        "parameters": "9b",
+        "size": "6.1 GB",
+        "size_bytes": 6594474711
+      },
+      {
+        "parameters": "27b",
+        "size": "16.2 GB",
+        "size_bytes": 17420432728
+      },
+      {
+        "parameters": "35b",
+        "size": "22.2 GB",
+        "size_bytes": 23869191742
+      },
+      {
+        "parameters": "122b",
+        "size": "75.8 GB",
+        "size_bytes": 81370036360
+      }
+    ]
+  },
+  {
+    "name": "llava",
+    "model": "llava",
+    "description": "🌋 LLaVA is a novel end-to-end trained large multimodal model that combines a vision encoder and Vicuna for general-purpose visual and language understanding. Updated to version 1.6.",
+    "popularity": 14500000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "7b",
+        "size": "4.4 GB",
+        "size_bytes": 4733363377
+      },
+      {
+        "parameters": "13b",
+        "size": "7.5 GB",
+        "size_bytes": 8011256494
+      },
+      {
+        "parameters": "34b",
+        "size": "18.8 GB",
+        "size_bytes": 20166497526
+      }
+    ]
+  },
+  {
+    "name": "mxbai-embed-large",
+    "model": "mxbai-embed-large",
+    "description": "State-of-the-art large embedding model from mixedbread.ai",
+    "popularity": 13400000,
+    "can_process_image": false,
+    "is_embedding": true,
+    "versions": [
+      {
+        "parameters": "335m",
+        "size": "638.6 MB",
+        "size_bytes": 669615493
+      }
+    ]
+  },
+  {
+    "name": "gpt-oss",
+    "model": "gpt-oss",
+    "description": "OpenAI’s open-weight models designed for powerful reasoning, agentic tasks, and versatile developer use cases.",
+    "popularity": 11500000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "20b",
+        "size": "12.8 GB",
+        "size_bytes": 13793441244
+      },
+      {
+        "parameters": "120b",
+        "size": "60.9 GB",
+        "size_bytes": 65369818941
+      }
+    ]
+  },
+  {
+    "name": "qwen3-coder",
+    "model": "qwen3-coder",
+    "description": "Alibaba's performant long context models for agentic and coding tasks.",
+    "popularity": 8100000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "30b",
+        "size": "17.3 GB",
+        "size_bytes": 18556700761
+      },
+      {
+        "parameters": "480b",
+        "size": "270.1 GB",
+        "size_bytes": 290058836445
+      }
+    ]
+  },
+  {
+    "name": "phi4",
+    "model": "phi4",
+    "description": "Phi-4 is a 14B parameter, state-of-the-art open model from Microsoft.",
+    "popularity": 7700000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "14b",
+        "size": "8.4 GB",
+        "size_bytes": 9053116391
+      }
+    ]
+  },
+  {
+    "name": "qwen",
+    "model": "qwen",
+    "description": "Qwen 1.5 is a series of large language models by Alibaba Cloud spanning from 0.5B to 110B parameters",
+    "popularity": 7500000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.5b",
+        "size": "376.7 MB",
+        "size_bytes": 394998579
+      },
+      {
+        "parameters": "1.8b",
+        "size": "1.0 GB",
+        "size_bytes": 1120243281
+      },
+      {
+        "parameters": "4b",
+        "size": "2.2 GB",
+        "size_bytes": 2330093361
+      },
+      {
+        "parameters": "7b",
+        "size": "4.2 GB",
+        "size_bytes": 4511914544
+      },
+      {
+        "parameters": "14b",
+        "size": "7.6 GB",
+        "size_bytes": 8179329873
+      },
+      {
+        "parameters": "32b",
+        "size": "17.2 GB",
+        "size_bytes": 18498677860
+      },
+      {
+        "parameters": "72b",
+        "size": "38.2 GB",
+        "size_bytes": 41000400593
+      },
+      {
+        "parameters": "110b",
+        "size": "58.6 GB",
+        "size_bytes": 62890080101
+      }
+    ]
+  },
+  {
+    "name": "llama2",
+    "model": "llama2",
+    "description": "Llama 2 is a collection of foundation language models ranging from 7B to 70B parameters.",
+    "popularity": 7300000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "7b",
+        "size": "3.6 GB",
+        "size_bytes": 3826793677
+      },
+      {
+        "parameters": "13b",
+        "size": "6.9 GB",
+        "size_bytes": 7366821294
+      },
+      {
+        "parameters": "70b",
+        "size": "36.2 GB",
+        "size_bytes": 38873235886
+      }
+    ]
+  },
+  {
+    "name": "gemma",
+    "model": "gemma",
+    "description": "Gemma is a family of lightweight, state-of-the-art open models built by Google DeepMind. Updated to version 1.1",
+    "popularity": 7300000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "2b",
+        "size": "1.6 GB",
+        "size_bytes": 1678456656
+      },
+      {
+        "parameters": "7b",
+        "size": "4.7 GB",
+        "size_bytes": 5011853225
+      }
+    ]
+  },
+  {
+    "name": "glm-ocr",
+    "model": "glm-ocr",
+    "description": "GLM-OCR is a multimodal OCR model for complex document understanding, built on the GLM-V encoder–decoder architecture.",
+    "popularity": 7000000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "latest",
+        "size": "2.1 GB",
+        "size_bytes": 2219299168
+      }
+    ]
+  },
+  {
+    "name": "qwen2",
+    "model": "qwen2",
+    "description": "Qwen2 is a new series of large language models from Alibaba group",
+    "popularity": 6100000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "0.5b",
+        "size": "335.8 MB",
+        "size_bytes": 352164041
+      },
+      {
+        "parameters": "1.5b",
+        "size": "891.7 MB",
+        "size_bytes": 934964102
+      },
+      {
+        "parameters": "7b",
+        "size": "4.1 GB",
+        "size_bytes": 4431401491
+      },
+      {
+        "parameters": "72b",
+        "size": "38.4 GB",
+        "size_bytes": 41231744117
+      }
+    ]
+  },
+  {
+    "name": "codellama",
+    "model": "codellama",
+    "description": "A large language model that can use text prompts to generate and discuss code.",
+    "popularity": 5900000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "7b",
+        "size": "3.6 GB",
+        "size_bytes": 3825910662
+      },
+      {
+        "parameters": "13b",
+        "size": "6.9 GB",
+        "size_bytes": 7365960935
+      },
+      {
+        "parameters": "34b",
+        "size": "17.7 GB",
+        "size_bytes": 19052049085
+      },
+      {
+        "parameters": "70b",
+        "size": "36.2 GB",
+        "size_bytes": 38872431643
+      }
+    ]
+  },
+  {
+    "name": "bge-m3",
+    "model": "bge-m3",
+    "description": "BGE-M3 is a new model from BAAI distinguished for its versatility in Multi-Functionality, Multi-Linguality, and Multi-Granularity.",
+    "popularity": 5700000,
+    "can_process_image": false,
+    "is_embedding": true,
+    "versions": [
+      {
+        "parameters": "567m",
+        "size": "1.1 GB",
+        "size_bytes": 1157672605
+      }
+    ]
+  },
+  {
+    "name": "mistral-nemo",
+    "model": "mistral-nemo",
+    "description": "A state-of-the-art 12B model with 128k context length, built by Mistral AI in collaboration with NVIDIA.",
+    "popularity": 5600000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "12b",
+        "size": "6.6 GB",
+        "size_bytes": 7071713227
+      }
+    ]
+  },
+  {
+    "name": "qwen3.6",
+    "model": "qwen3.6",
+    "description": "Qwen3.6 delivers substantial upgrades in agentic coding and thinking preservation than previous Qwen models.",
+    "popularity": 5500000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "27b",
+        "size": "16.2 GB",
+        "size_bytes": 17420432739
+      },
+      {
+        "parameters": "35b",
+        "size": "22.3 GB",
+        "size_bytes": 23938333577
+      }
+    ]
+  },
+  {
+    "name": "minicpm-v",
+    "model": "minicpm-v",
+    "description": "A series of multimodal LLMs (MLLMs) designed for vision-language understanding.",
+    "popularity": 5400000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "8b",
+        "size": "5.1 GB",
+        "size_bytes": 5473838466
+      }
+    ]
+  },
+  {
+    "name": "tinyllama",
+    "model": "tinyllama",
+    "description": "The TinyLlama project is an open endeavor to train a compact 1.1B Llama model on 3 trillion tokens.",
+    "popularity": 5400000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "1.1b",
+        "size": "608.2 MB",
+        "size_bytes": 637700138
+      }
+    ]
+  },
+  {
+    "name": "qwen3-vl",
+    "model": "qwen3-vl",
+    "description": "The most powerful vision-language model in the Qwen model family to date.",
+    "popularity": 5100000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "2b",
+        "size": "1.8 GB",
+        "size_bytes": 1889519687
+      },
+      {
+        "parameters": "4b",
+        "size": "3.1 GB",
+        "size_bytes": 3295636135
+      },
+      {
+        "parameters": "8b",
+        "size": "5.7 GB",
+        "size_bytes": 6140415879
+      },
+      {
+        "parameters": "30b",
+        "size": "18.2 GB",
+        "size_bytes": 19595410062
+      },
+      {
+        "parameters": "32b",
+        "size": "19.5 GB",
+        "size_bytes": 20910297800
+      },
+      {
+        "parameters": "235b",
+        "size": "133.4 GB",
+        "size_bytes": 143268653711
+      }
+    ]
+  },
+  {
+    "name": "llama3.2-vision",
+    "model": "llama3.2-vision",
+    "description": "Llama 3.2 Vision is a collection of instruction-tuned image reasoning generative models in 11B and 90B sizes.",
+    "popularity": 5000000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "11b",
+        "size": "7.3 GB",
+        "size_bytes": 7816589186
+      },
+      {
+        "parameters": "90b",
+        "size": "50.9 GB",
+        "size_bytes": 54622563330
+      }
+    ]
+  },
+  {
+    "name": "deepseek-coder",
+    "model": "deepseek-coder",
+    "description": "DeepSeek Coder is a capable coding model trained on two trillion code and natural language tokens.",
+    "popularity": 4500000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "1.3b",
+        "size": "740.1 MB",
+        "size_bytes": 776080839
+      },
+      {
+        "parameters": "6.7b",
+        "size": "3.6 GB",
+        "size_bytes": 3827834503
+      },
+      {
+        "parameters": "33b",
+        "size": "17.5 GB",
+        "size_bytes": 18819456424
+      }
+    ]
+  },
+  {
+    "name": "llama3.3",
+    "model": "llama3.3",
+    "description": "New state of the art 70B model. Llama 3.3 70B offers similar performance compared to the Llama 3.1 405B model.",
+    "popularity": 4099999,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "70b",
+        "size": "39.6 GB",
+        "size_bytes": 42520413916
+      }
+    ]
+  },
+  {
+    "name": "dolphin3",
+    "model": "dolphin3",
+    "description": "Dolphin 3.0 Llama 3.1 8B 🐬 is the next generation of the Dolphin series of instruct-tuned models designed to be the ultimate general purpose local model, enabling coding, math, agentic, function calling, and general use cases.",
+    "popularity": 4000000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "8b",
+        "size": "4.6 GB",
+        "size_bytes": 4920757726
+      }
+    ]
+  },
+  {
+    "name": "qwen2.5vl",
+    "model": "qwen2.5vl",
+    "description": "Flagship vision-language model of Qwen and also a significant leap from the previous Qwen2-VL.",
+    "popularity": 3900000,
+    "can_process_image": true,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "3b",
+        "size": "3.0 GB",
+        "size_bytes": 3200627168
+      },
+      {
+        "parameters": "7b",
+        "size": "5.6 GB",
+        "size_bytes": 5969245856
+      },
+      {
+        "parameters": "32b",
+        "size": "19.7 GB",
+        "size_bytes": 21159310657
+      },
+      {
+        "parameters": "72b",
+        "size": "45.4 GB",
+        "size_bytes": 48709042849
+      }
+    ]
+  },
+  {
+    "name": "smollm2",
+    "model": "smollm2",
+    "description": "SmolLM2 is a family of compact language models available in three size: 135M, 360M, and 1.7B parameters.",
+    "popularity": 3900000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "135m",
+        "size": "258.3 MB",
+        "size_bytes": 270898672
+      },
+      {
+        "parameters": "360m",
+        "size": "692.0 MB",
+        "size_bytes": 725566512
+      },
+      {
+        "parameters": "1.7b",
+        "size": "1.7 GB",
+        "size_bytes": 1820428533
+      }
+    ]
+  },
+  {
+    "name": "deepseek-v3",
+    "model": "deepseek-v3",
+    "description": "A strong Mixture-of-Experts (MoE) language model with 671B total parameters with 37B activated for each token.",
+    "popularity": 3800000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "671b",
+        "size": "376.7 GB",
+        "size_bytes": 404430200769
+      }
+    ]
+  },
+  {
+    "name": "olmo2",
+    "model": "olmo2",
+    "description": "OLMo 2 is a new family of 7B and 13B models trained on up to 5T tokens. These models are on par with or better than equivalently sized fully open models, and competitive with open-weight models such as Llama 3.1 on English academic benchmarks.",
+    "popularity": 3700000,
+    "can_process_image": false,
+    "is_embedding": false,
+    "versions": [
+      {
+        "parameters": "7b",
+        "size": "4.2 GB",
+        "size_bytes": 4472032405
+      },
+      {
+        "parameters": "13b",
+        "size": "7.8 GB",
+        "size_bytes": 8354361686
+      }
+    ]
+  },
+  {
+    "name": "qwen3-embedding",
+    "model": "qwen3-embedding",
+    "description": "Building upon the foundational models of the Qwen3 series, Qwen3 Embedding provides a comprehensive range of text embeddings models in various sizes",
+    "popularity": 3600000,
+    "can_process_image": false,
+    "is_embedding": true,
+    "versions": [
+      {
+        "parameters": "0.6b",
+        "size": "609.5 MB",
+        "size_bytes": 639150858
+      },
+      {
+        "parameters": "4b",
+        "size": "2.3 GB",
+        "size_bytes": 2496704041
+      },
+      {
+        "parameters": "8b",
+        "size": "4.4 GB",
+        "size_bytes": 4676805193
+      }
+    ]
+  }
+]

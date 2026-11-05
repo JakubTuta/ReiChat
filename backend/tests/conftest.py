@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
@@ -7,13 +8,38 @@ from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx_ws import AsyncWebSocketSession, aconnect_ws
 from httpx_ws.transport import ASGIWebSocketTransport
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp
 
+from app.db.base import Base
+from app.db.session import SessionLocal, engine
 from app.main import create_app
+from tests.database import migrate, recreate_database
 
 FRONTEND_ORIGIN = "http://localhost:3000"
 
 ConnectWs = Callable[..., AbstractAsyncContextManager[AsyncWebSocketSession]]
+
+
+@pytest.fixture(scope="session")
+def migrated_database() -> None:
+    # Built by the real migrations rather than metadata.create_all, so a broken
+    # migration fails here and not on someone's first `docker compose up`.
+    asyncio.run(recreate_database("chatbot_test"))
+    migrate("chatbot_test")
+
+
+@pytest.fixture
+async def db(migrated_database: None) -> AsyncIterator[AsyncSession]:
+    # Truncating (not rolling back) so the app's own sessions — request handlers,
+    # websocket handlers, background tasks — see exactly what the test wrote.
+    # Tables start empty; the seeded catalog is covered by the migration tests.
+    tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+    async with engine.begin() as connection:
+        await connection.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+    async with SessionLocal() as session:
+        yield session
 
 
 @pytest.fixture

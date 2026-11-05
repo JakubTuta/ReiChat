@@ -45,6 +45,20 @@ jobs:
 
   backend-fastapi:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: chatbot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin -d chatbot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend

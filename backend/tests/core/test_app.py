@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
 from asgi_lifespan import LifespanManager
@@ -28,3 +31,13 @@ async def test_api_docs_are_served_when_debug_is_on(monkeypatch: pytest.MonkeyPa
                 assert (await client.get("/openapi.json")).status_code == 200
     finally:
         get_settings.cache_clear()
+
+
+async def test_shutdown_closes_the_database_connections(monkeypatch: pytest.MonkeyPatch):
+    dispose = AsyncMock()
+    monkeypatch.setattr("app.main.engine", SimpleNamespace(dispose=dispose))
+
+    async with LifespanManager(create_app()):
+        dispose.assert_not_awaited()
+
+    dispose.assert_awaited_once()

@@ -27,11 +27,22 @@ CORS_ALLOWED_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
 
 
 class Settings(BaseSettings):
+    # Set by the Dockerfile. Inside the compose network postgres answers to its
+    # service name; from source it is the loopback port compose publishes.
+    docker: bool = False
+
     # Renders the OpenAPI docs, so it stays off unless you deliberately ask for
     # it while running from source.
     debug: bool = False
 
-    @field_validator("debug", mode="before")
+    db_name: str = "chatbot"
+
+    # One connection per use instead of a pool. Tests run every test on its own
+    # event loop, and a pooled asyncpg connection is bound to the loop that
+    # opened it.
+    db_null_pool: bool = False
+
+    @field_validator("docker", "debug", "db_null_pool", mode="before")
     @classmethod
     def _only_true_enables(cls, value: Any) -> bool:
         # DEBUG is a shared environment name (Node's `debug` package uses

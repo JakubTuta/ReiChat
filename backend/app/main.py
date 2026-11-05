@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -7,10 +10,17 @@ from app.core.config import ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, get_settings
 from app.core.errors import UnhandledErrorMiddleware, register_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import OriginGuardMiddleware, SecurityHeadersMiddleware
+from app.db.session import engine
 
 
 async def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -18,6 +28,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="ReiChat",
+        lifespan=lifespan,
         docs_url="/docs" if settings.debug else None,
         redoc_url=None,
         openapi_url="/openapi.json" if settings.debug else None,

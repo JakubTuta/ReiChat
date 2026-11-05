@@ -53,11 +53,17 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 110
 target-version = "py313"
-extend-exclude = ["migrations/versions"]
+
+[tool.ruff.format]
+# Alembic writes these files in its own style; they are reviewed, not reformatted.
+exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "FAST"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"migrations/versions/*" = ["E", "I", "UP", "F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
