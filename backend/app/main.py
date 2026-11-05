@@ -22,6 +22,7 @@ from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import OriginGuardMiddleware, SecurityHeadersMiddleware
 from app.db.session import engine
 from app.mcp_integration import router as mcp_router
+from app.openai_compat import router as openai_router
 from app.personas import router as personas_router
 from app.prompt_templates import router as prompt_templates_router
 from app.rag import router as rag_router
@@ -97,6 +98,7 @@ def create_app() -> FastAPI:
     app.include_router(compare_router.router)
     app.include_router(containers_router.router)
     app.include_router(mcp_router.router)
+    app.include_router(openai_router.router)
     app.include_router(personas_router.router)
     app.include_router(prompt_templates_router.router)
     app.include_router(rag_router.router)

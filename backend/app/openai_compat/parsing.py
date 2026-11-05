@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
+from app.llm.generation import GenerationParams
 
 _VALID_ROLES = {"system", "user", "assistant"}
 
@@ -52,7 +53,7 @@ class ParsedRequest(typing.TypedDict):
     image: str
     history: list[ParsedTurn]
     stream: bool
-    generation_params: dict[str, float | int]
+    generation_params: GenerationParams
 
 
 def _extract_text_and_image(content: object, index: int) -> tuple[str, str]:
@@ -105,16 +106,22 @@ def _extract_text_and_image(content: object, index: int) -> tuple[str, str]:
     return "".join(text_parts), image
 
 
-def _parse_generation_params(body: dict[str, typing.Any]) -> dict[str, float | int]:
-    generation_params: dict[str, float | int] = {}
+def _optional_float(body: dict[str, typing.Any], key: str) -> float | None:
+    value = body.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise OpenAICompatError(400, f"{key} must be a number.", param=key)
+    return float(value)
 
-    for key in ("temperature", "top_p"):
-        value = body.get(key)
-        if value is None:
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise OpenAICompatError(400, f"{key} must be a number.", param=key)
-        generation_params[key] = float(value)
+
+def _parse_generation_params(body: dict[str, typing.Any]) -> GenerationParams:
+    generation_params = GenerationParams()
+
+    if (temperature := _optional_float(body, "temperature")) is not None:
+        generation_params["temperature"] = temperature
+    if (top_p := _optional_float(body, "top_p")) is not None:
+        generation_params["top_p"] = top_p
 
     seed = body.get("seed")
     if seed is not None:
