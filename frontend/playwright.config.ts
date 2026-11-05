@@ -1,7 +1,7 @@
 import process from 'node:process'
 import { defineConfig, devices } from '@playwright/test'
 
-// This app is a Nuxt SPA + Django/Channels + Postgres + Docker stack, not a
+// This app is a Nuxt SPA + FastAPI + Postgres + Docker stack, not a
 // single `npm run dev` process — CI (and local runs) are expected to bring
 // up `docker compose` themselves before invoking Playwright, rather than
 // Playwright managing a `webServer` here. See tests/e2e/README.md.

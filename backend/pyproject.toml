@@ -1,0 +1,80 @@
+[project]
+name = "reichat-backend"
+version = "0.1.0"
+description = "ReiChat backend: FastAPI + async SQLAlchemy in front of app-managed Ollama containers"
+requires-python = "==3.13.*"
+dependencies = [
+    "fastapi==0.162.0",
+    "uvicorn[standard]==0.54.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.16.2",
+    "sqlalchemy[asyncio]==2.1.8",
+    "asyncpg==0.32.0",
+    "pgvector==0.5.0",
+    "alembic==1.20.1",
+    "httpx==0.28.1",
+    "python-multipart==0.0.33",
+    "docker==7.2.0",
+    "beautifulsoup4==4.15.0",
+    "langchain-core==1.5.3",
+    "langchain-ollama==1.1.0",
+    "langchain-text-splitters==1.1.2",
+    "ollama==0.6.2",
+    "pypdf==6.15.0",
+    "python-docx==1.2.0",
+    "mcp==1.29.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-timeout>=2.4.0",
+    "respx>=0.22.0",
+    "asgi-lifespan>=2.1.0",
+    "httpx-ws>=0.7.2",
+    "ruff==0.16.2",
+    "mypy>=1.18.0",
+]
+
+[tool.uv]
+# An application, not a library: nothing to build or install into the venv.
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# A frame that never arrives must fail the test, not hang the run.
+timeout = 30
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.format]
+# Alembic writes these files in its own style; they are reviewed, not reformatted.
+exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "FAST"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"migrations/versions/*" = ["E", "I", "UP", "F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+strict = true
+warn_unreachable = true
+files = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["docker.*", "pgvector.*"]
+ignore_missing_imports = true

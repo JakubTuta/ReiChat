@@ -1,6 +1,0 @@
--r requirements.txt
-
-pytest==9.1.1
-pytest-django==4.13.0
-pytest-asyncio==1.4.0
-ruff==0.16.2

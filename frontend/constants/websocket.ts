@@ -16,7 +16,7 @@ export interface GenerationStats {
 }
 
 // How full the model's memory (context window) was for one reply — see
-// django_app/context_window.py. `used` and `limit` are in tokens.
+// backend/app/chat/context_window.py. `used` and `limit` are in tokens.
 export interface ContextReport {
   limit: number
   used: number
