@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -5,8 +6,10 @@ import httpx
 import pytest
 from asgi_lifespan import LifespanManager
 
+from app.core import tasks
 from app.core.config import get_settings
 from app.main import create_app
+from app.realtime.hub import hub
 
 
 async def test_health_check(client: httpx.AsyncClient):
@@ -41,3 +44,19 @@ async def test_shutdown_closes_the_database_connections(monkeypatch: pytest.Monk
         dispose.assert_not_awaited()
 
     dispose.assert_awaited_once()
+
+
+async def test_the_hub_can_reach_the_event_loop_while_the_app_runs_and_not_after():
+    async with LifespanManager(create_app()):
+        queue = hub.subscribe()
+        hub.publish({"type": "snapshot"})
+        assert await asyncio.wait_for(queue.get(), timeout=2) == {"type": "snapshot"}
+
+    assert hub.subscriber_count == 0
+
+
+async def test_shutdown_stops_background_work():
+    async with LifespanManager(create_app()):
+        task = tasks.spawn(asyncio.sleep(60), name="long-running")
+
+    assert task.cancelled()

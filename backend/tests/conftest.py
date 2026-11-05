@@ -12,14 +12,41 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp
 
+from app import runtime_settings
+from app.core import tasks
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.llm import ollama_api
 from app.main import create_app
+from app.realtime import progress
+from app.realtime.hub import hub
 from tests.database import migrate, recreate_database
 
 FRONTEND_ORIGIN = "http://localhost:3000"
 
 ConnectWs = Callable[..., AbstractAsyncContextManager[AsyncWebSocketSession]]
+
+
+@pytest.fixture(autouse=True)
+async def _reset_process_wide_state(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
+    # Module-level registries live for the whole test run, so one test's
+    # leftovers would otherwise leak into the next.
+    progress.reset()
+    ollama_api._show_cache.clear()
+    yield
+    await tasks.cancel_all()
+    hub.unbind()
+
+
+@pytest.fixture(autouse=True)
+def _app_managed_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Reading the runtime setting is a database query, which most tests here
+    # can't make. Default every test to app-managed containers; tests about
+    # the user's own Ollama override this.
+    async def not_set() -> None:
+        return None
+
+    monkeypatch.setattr(runtime_settings, "external_ollama_url", not_set)
 
 
 @pytest.fixture(scope="session")

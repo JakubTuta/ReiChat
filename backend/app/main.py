@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,11 +7,13 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.core import tasks
 from app.core.config import ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, get_settings
 from app.core.errors import UnhandledErrorMiddleware, register_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import OriginGuardMiddleware, SecurityHeadersMiddleware
 from app.db.session import engine
+from app.realtime.hub import hub
 
 
 async def health_check() -> dict[str, str]:
@@ -19,7 +22,11 @@ async def health_check() -> dict[str, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    hub.bind(asyncio.get_running_loop())
     yield
+    # Background work may still be using the database, so it stops first.
+    await tasks.cancel_all()
+    hub.unbind()
     await engine.dispose()
 
 
