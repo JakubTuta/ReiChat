@@ -11,6 +11,8 @@
     "preview": "nuxt preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "playwright test -c playwright.browser.config.ts",
+    "test:browser:update": "playwright test -c playwright.browser.config.ts --update-snapshots",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
