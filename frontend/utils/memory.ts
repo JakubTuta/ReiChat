@@ -1,6 +1,6 @@
 import type { ContextReport } from '~/constants/websocket'
 
-// Mirrors MEMORY_PRESETS in django_app/context_window.py. Sizes are tokens;
+// Mirrors MEMORY_PRESETS in backend/app/chat/context_window.py. Sizes are tokens;
 // everything the user sees is in "pages" (~500 words ≈ 650 tokens).
 export interface MemoryPreset {
   id: string

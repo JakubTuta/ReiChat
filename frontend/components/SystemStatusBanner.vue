@@ -35,8 +35,8 @@ onMounted(async () => {
       </template>
 
       <template v-else>
-        Can't reach the backend server. This is separate from Docker — check that the Django server
-        is running, then recheck.
+        Can't reach the backend server. This is separate from Docker — check that the server
+        container is running, then recheck.
       </template>
     </span>
 

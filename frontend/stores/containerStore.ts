@@ -182,8 +182,8 @@ export const useContainerStore = defineStore('container', () => {
       systemMessage.value = error.response?.data?.error ?? ''
 
       // No `response` at all (or ERR_NETWORK) means the request never got
-      // a reply from Django — the backend itself is down, not Docker.
-      // A `response` (4xx/5xx) means Django answered and Docker is what's
+      // a reply from the backend — the backend itself is down, not Docker.
+      // A `response` (4xx/5xx) means the backend answered and Docker is what's
       // unreachable. Collapsing both into "Docker is not running" sent
       // users to restart Docker Desktop forever when the real problem was
       // the backend container being down.

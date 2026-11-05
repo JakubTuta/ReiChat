@@ -1,5 +1,5 @@
 // A model's thinking controls as /api/show reports them (see
-// django_app/ollama_api.thinking_controls).
+// backend/app/llm/ollama_api.thinking_controls).
 export interface ThinkingControls {
   values: (boolean | string)[]
   default: boolean | string

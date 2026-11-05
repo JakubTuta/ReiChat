@@ -8,7 +8,7 @@ a CI job that runs on every push.
 
 ## Running locally
 
-The app is a multi-container stack (Postgres + Django/Channels + Nuxt), not
+The app is a multi-container stack (Postgres + FastAPI + Nuxt), not
 a single dev server, so Playwright does not manage a `webServer` here.
 Bring the stack up yourself first:
 
